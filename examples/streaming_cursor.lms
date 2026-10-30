@@ -1,0 +1,19 @@
+# OCI Streaming pipeline: create stream, publish record, create cursor, and consume messages.
+mkdir("data");
+oci = _dsl_ schema="../schema/lmoci.dsl.json";
+let cloud = oci.demo();
+let run = cloud.run("sdemo01", "data/ledgers");
+let stream = run.stream("telemetry");
+let sid = stream.get("id");
+let pub = cloud.stream_put(sid, "host-01", "cpu=42.5");
+check(pub.number("failures") == 0);
+let cur = cloud.stream_cursor(sid, "0", "TRIM_HORIZON");
+let cursor_val = cur.get("cursor");
+check(str_len(cursor_val) > 0);
+let msgs = cloud.stream_get_messages(sid, cursor_val);
+check(msgs.len() == 1);
+check(msgs.at(0).get("value") == "cpu=42.5");
+run.cleanup();
+check(run.remaining() == 0);
+end _dsl_
+savedsl(oci, "data/streaming-cursor-oci.dslb");

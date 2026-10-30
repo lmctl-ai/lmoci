@@ -1,0 +1,4 @@
+[
+  {"name":"org.sqlite.JDBC","allDeclaredConstructors":true},
+  {"name":"ai.lmctl.lmoci.JdkHttpProvider","allDeclaredConstructors":true,"allPublicMethods":true}
+]

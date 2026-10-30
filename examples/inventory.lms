@@ -1,0 +1,26 @@
+# Full 16-section OCI inventory in offline demo mode (or live when LMOCI_ENDPOINT is set).
+mkdir("data");
+oci = _dsl_ schema="../schema/lmoci.dsl.json";
+let cloud = oci.demo();
+check(cloud.is_demo());
+check(cloud.identity().len() == 1);
+check(cloud.regions().len() >= 1);
+check(cloud.availability_domains().len() >= 1);
+check(cloud.compartments().len() >= 1);
+check(cloud.users().len() >= 1);
+check(cloud.groups().len() >= 1);
+check(cloud.policies().len() >= 1);
+check(cloud.buckets().len() >= 1);
+check(cloud.queues().len() >= 1);
+check(cloud.streams().len() >= 1);
+check(cloud.vaults().len() >= 1);
+check(cloud.secrets().len() >= 1);
+check(cloud.functions().len() >= 1);
+check(cloud.clusters().len() >= 1);
+check(cloud.db_systems().len() >= 1);
+check(cloud.tenancies().len() >= 1);
+cloud.buckets().csv("data/oci-buckets.csv");
+let snap = cloud.snapshot();
+file_write("data/oci-snapshot.json", snap.json());
+end _dsl_
+savedsl(oci, "data/inventory-oci.dslb");

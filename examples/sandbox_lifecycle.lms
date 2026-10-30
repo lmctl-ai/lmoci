@@ -1,0 +1,17 @@
+# Owned sandbox resource lifecycle across all 6 resource types with reverse-order cleanup.
+mkdir("data");
+oci = _dsl_ schema="../schema/lmoci.dsl.json";
+let cloud = oci.demo();
+let run = cloud.run("life01", "data/ledgers");
+let c = run.compartment("sandbox");
+let b = run.bucket("artifacts");
+let q = run.queue("jobs");
+let s = run.stream("events");
+let p = run.policy("readonly");
+let a = run.application("fnapp");
+check(run.remaining() == 6);
+check(run.describe(b).get("status") == "ACTIVE");
+run.cleanup();
+check(run.remaining() == 0);
+end _dsl_
+savedsl(oci, "data/sandbox-lifecycle-oci.dslb");

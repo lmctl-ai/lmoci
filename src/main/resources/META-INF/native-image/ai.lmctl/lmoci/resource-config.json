@@ -1,0 +1,9 @@
+{
+  "resources": {
+    "includes": [
+      {"pattern":"^THIRD_PARTY_NOTICES$"},
+      {"pattern":"META-INF/services/.*"},
+      {"pattern":"org/sqlite/native/.*"}
+    ]
+  }
+}

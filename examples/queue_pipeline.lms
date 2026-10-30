@@ -1,0 +1,19 @@
+# OCI Queue pipeline: sandbox queue creation, message publish, receive, and delete receipt.
+mkdir("data");
+oci = _dsl_ schema="../schema/lmoci.dsl.json";
+let cloud = oci.demo();
+let run = cloud.run("qdemo01", "data/ledgers");
+let q = run.queue("events");
+let qid = q.get("id");
+let sent = cloud.queue_put(qid, "order-created:1001");
+check(sent.number("message_count") == 1);
+let received = cloud.queue_receive(qid);
+check(received.len() == 1);
+let first = received.at(0);
+check(first.get("content") == "order-created:1001");
+let ack = cloud.queue_delete_message(qid, first.get("receipt"));
+check(ack.get("deleted") == "true");
+run.cleanup();
+check(run.remaining() == 0);
+end _dsl_
+savedsl(oci, "data/queue-pipeline-oci.dslb");

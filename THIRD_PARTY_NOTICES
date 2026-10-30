@@ -1,0 +1,30 @@
+lmoci 0.1.0 — third-party and toolchain notices
+
+lmoci and the lmcode-java SDK are distributed under the MIT License in LICENSE.
+
+Bundled runtime dependencies (versions are pinned in pom.xml and sdk.lock):
+
+* Oracle Cloud Infrastructure SDK for Java (com.oracle.oci.sdk:oci-java-sdk-*)
+  3.92.1 — dual Universal Permissive License (UPL) 1.0 and Apache License 2.0.
+* Jackson (com.fasterxml.jackson.core:jackson-core / jackson-databind /
+  jackson-annotations / jackson-datatype-jsr310) 2.18.2 — Apache License 2.0.
+* SQLite-JDBC (org.xerial:sqlite-jdbc) 3.50.3.0 — Apache License 2.0; the
+  underlying SQLite engine is in the public domain.
+* Jakarta Annotation / WS-RS / Inject APIs (jakarta.*) — Eclipse Public
+  License 2.0 / Apache License 2.0.
+* SLF4J API and NOP binding (org.slf4j:slf4j-api / slf4j-nop) 2.0.16 — MIT.
+
+Java and GraalVM Native Image:
+
+The JVM runtime uses the Java platform supplied by the user. Native builds use
+GraalVM Community Edition and its Native Image substrate runtime under GPLv2
+with the Classpath Exception. Linux native binaries dynamically link the host
+system glibc (LGPL-2.1-or-later, minimum glibc 2.35); no glibc implementation
+is statically linked or bundled.
+
+Corresponding upstream sources:
+* GraalVM CE release builds: https://github.com/graalvm/graalvm-ce-builds/releases/tag/jdk-25.0.2
+* GraalVM source: https://github.com/oracle/graal/tree/jdk-25.0.2
+* OCI Java SDK source: https://github.com/oracle/oci-java-sdk/tree/v3.92.1
+* SQLite-JDBC source: https://github.com/xerial/sqlite-jdbc/tree/3.50.3.0
+* lmcode-java source: https://github.com/lmctl-ai/lmcode-java/tree/v0.1.1

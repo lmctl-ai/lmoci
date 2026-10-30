@@ -1,0 +1,24 @@
+# Object Storage bucket and object round-trip (namespace, create, put, head, list, get, rename, delete).
+mkdir("data");
+oci = _dsl_ schema="../schema/lmoci.dsl.json";
+let cloud = oci.demo();
+let ns = cloud.namespace();
+check(str_len(ns) > 0);
+let b = cloud.bucket_create("lmoci-demo-objects");
+check(b.get("bucket") == "lmoci-demo-objects");
+let put_res = cloud.object_put("lmoci-demo-objects", "reports/q1.txt", "hello oracle cloud");
+check(put_res.number("content_length") == 18);
+let head_res = cloud.object_head("lmoci-demo-objects", "reports/q1.txt");
+check(head_res.get("exists") == "true");
+let listed = cloud.object_list("lmoci-demo-objects", "reports/");
+check(listed.len() == 1);
+let got = cloud.object_get("lmoci-demo-objects", "reports/q1.txt");
+check(got.get("content") == "hello oracle cloud");
+let ren = cloud.object_rename("lmoci-demo-objects", "reports/q1.txt", "reports/q1-final.txt");
+check(ren.get("renamed") == "true");
+let del_obj = cloud.object_delete("lmoci-demo-objects", "reports/q1-final.txt");
+check(del_obj.get("deleted") == "true");
+let del_bkt = cloud.bucket_delete("lmoci-demo-objects");
+check(del_bkt.get("deleted") == "true");
+end _dsl_
+savedsl(oci, "data/object-storage-oci.dslb");
