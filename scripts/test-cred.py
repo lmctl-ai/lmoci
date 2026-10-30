@@ -44,7 +44,7 @@ def main() -> None:
         db_path = d / "creds.db"
         key_file = d / "oci_api_key.pem"
         fake_key = "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7\n-----END PRIVATE KEY-----"
-        key_file.write_text(fake_key, encoding="utf-8")
+        key_file.write_text(fake_key, encoding="utf-8", newline="\n")
 
         env = dict(os.environ)
         env["LMOCI_DB"] = str(db_path)

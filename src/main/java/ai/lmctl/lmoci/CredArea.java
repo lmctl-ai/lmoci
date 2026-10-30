@@ -65,7 +65,7 @@ public final class CredArea {
             String value = parsed.opt(flag, null);
             if (value != null) {
                 if (flag.equals("private-key-file")) {
-                    fields.put("private_key", Files.readString(Path.of(value), StandardCharsets.UTF_8));
+                    fields.put("private_key", Files.readString(Path.of(value), StandardCharsets.UTF_8).replace("\r\n", "\n"));
                 } else {
                     fields.put(flag.replace('-', '_'), flag.equals("port") ? Integer.parseInt(value) : value);
                 }
