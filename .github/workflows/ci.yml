@@ -1,5 +1,8 @@
 name: ci
 on:
+  push:
+    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 env:
   PYTHONUTF8: '1'
