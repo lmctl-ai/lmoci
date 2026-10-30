@@ -13,7 +13,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.1.0.jar")
+HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.1.0-all.jar")
 BASE_ENV = dict(os.environ)
 for k in (
     "LMOCI_ENDPOINT",

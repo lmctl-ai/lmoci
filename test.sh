@@ -15,11 +15,14 @@ if [[ "${LMOCI_NATIVE:-0}" == "1" ]]; then
   else
     HOST="$ROOT/target/lmoci"
   fi
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    python3 scripts/check-linux-linkage.py "$HOST"
+  fi
 else
-  if [[ ! -f target/lmoci-0.1.0.jar ]]; then
+  if [[ ! -f target/lmoci-0.1.0-all.jar ]]; then
     mvn -q package -DskipTests
   fi
-  HOST="$ROOT/target/lmoci-0.1.0.jar"
+  HOST="$ROOT/target/lmoci-0.1.0-all.jar"
 fi
 
 python3 scripts/test-cli.py "$HOST"

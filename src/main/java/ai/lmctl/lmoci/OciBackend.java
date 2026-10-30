@@ -1093,6 +1093,24 @@ public final class OciBackend {
                 case "bucket" -> {
                     String ns = resolveNamespace(resolvedRegion, options);
                     try (ObjectStorageClient client = objectStorageClient(resolvedRegion)) {
+                        try {
+                            var listed = client.listObjects(ListObjectsRequest.builder()
+                                    .namespaceName(ns)
+                                    .bucketName(id)
+                                    .build()).getListObjects();
+                            if (listed != null && listed.getObjects() != null) {
+                                for (ObjectSummary obj : listed.getObjects()) {
+                                    if (obj.getName() != null) {
+                                        client.deleteObject(DeleteObjectRequest.builder()
+                                                .namespaceName(ns)
+                                                .bucketName(id)
+                                                .objectName(obj.getName())
+                                                .build());
+                                    }
+                                }
+                            }
+                        } catch (Exception ignored) {
+                        }
                         record("objectstorage", "DeleteBucket");
                         client.deleteBucket(DeleteBucketRequest.builder()
                                 .namespaceName(ns)

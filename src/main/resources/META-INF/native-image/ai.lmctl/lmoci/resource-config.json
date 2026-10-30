@@ -3,6 +3,8 @@
     "includes": [
       {"pattern":"^THIRD_PARTY_NOTICES$"},
       {"pattern":"META-INF/services/.*"},
+      {"pattern":"com/oracle/bmc/.*\\.properties$"},
+      {"pattern":"^sqlite-jdbc\\.properties$"},
       {"pattern":"org/sqlite/native/.*"}
     ]
   }
