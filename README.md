@@ -20,8 +20,8 @@ lmoci examples/sandbox_lifecycle.lms
 Inspect the typed DSL schema and signatures:
 
 ```bash
-lmoci --dsl-schema --json
-lmoci --dsl-signatures
+lmoci --lmcode-schema --json
+lmoci --lmcode-signatures
 lmoci --self-test
 ```
 

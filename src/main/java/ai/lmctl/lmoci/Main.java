@@ -30,8 +30,8 @@ public final class Main {
 
     private static final String HELP = """
             lmoci 0.1.0 — Oracle Cloud Infrastructure SDK for Java scripting host
-            usage: lmoci [--dry-run] [--apply] [--live] [--profile NAME] [--region NAME] [--endpoint URL] --dsl FILE
-                   lmoci --dsl-schema [--json] | --dsl-signatures [--without-std]
+            usage: lmoci [--dry-run] [--apply] [--live] [--profile NAME] [--region NAME] [--endpoint URL] --lmcode FILE
+                   lmoci --lmcode-schema [--json] | --lmcode-signatures [--without-std]
                    lmoci cred <set|get|list|delete|path> [options]
                    lmoci <os|iam|queue|stream|vault|inventory> <action> [options]
                    lmoci --version | --notices | --help | --self-test
@@ -182,16 +182,16 @@ public final class Main {
             byte[] schemaBytes = schema(registry);
 
             if (cleanArgs.length >= 1
-                    && "--dsl-schema".equals(cleanArgs[0])
+                    && "--lmcode-schema".equals(cleanArgs[0])
                     && (cleanArgs.length == 1 || (cleanArgs.length == 2 && "--json".equals(cleanArgs[1])))) {
                 System.out.write(schemaBytes);
                 return 0;
             }
-            if (Arrays.equals(cleanArgs, new String[] {"--dsl-signatures", "--without-std"})) {
+            if (Arrays.equals(cleanArgs, new String[] {"--lmcode-signatures", "--without-std"})) {
                 registry.hostSignatures().forEach(System.out::println);
                 return 0;
             }
-            if (Arrays.equals(cleanArgs, new String[] {"--dsl-signatures"})) {
+            if (Arrays.equals(cleanArgs, new String[] {"--lmcode-signatures"})) {
                 registry.signatures().forEach(System.out::println);
                 return 0;
             }
@@ -206,7 +206,7 @@ public final class Main {
                 runSelfTests(registry, schemaBytes);
                 return 0;
             }
-            if (cleanArgs.length != 2 || !"--dsl".equals(cleanArgs[0])) {
+            if (cleanArgs.length != 2 || !"--lmcode".equals(cleanArgs[0])) {
                 System.err.print(HELP);
                 return 2;
             }

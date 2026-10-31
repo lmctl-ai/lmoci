@@ -25,6 +25,11 @@ else
   HOST="$ROOT/target/lmoci-0.1.0-all.jar"
 fi
 
+if [[ "$HOST" == *.jar ]]; then
+  python3 scripts/check-host-flags.py schema/lmoci.dsl.json java -jar "$HOST"
+else
+  python3 scripts/check-host-flags.py schema/lmoci.dsl.json "$HOST"
+fi
 python3 scripts/test-cli.py "$HOST"
 python3 scripts/test-cred.py "$HOST"
 python3 scripts/test-fake.py "$HOST"

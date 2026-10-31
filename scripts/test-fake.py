@@ -660,7 +660,7 @@ savedsl(p, {json.dumps(str(dslb_path))});
 
         STATE.deletes.clear()
         proc = subprocess.run(
-            host_cmd() + ["--dsl", str(dslb_path)],
+            host_cmd() + ["--lmcode", str(dslb_path)],
             env=base_env,
             text=True,
             capture_output=True,
@@ -713,7 +713,7 @@ savedsl(p, {json.dumps(str(abort_dslb))});
         subprocess.run([lmscript, str(abort_lms)], check=True, capture_output=True, timeout=60)
         STATE.deletes.clear()
         abort_proc = subprocess.run(
-            host_cmd() + ["--dsl", str(abort_dslb)],
+            host_cmd() + ["--lmcode", str(abort_dslb)],
             env=base_env,
             text=True,
             capture_output=True,

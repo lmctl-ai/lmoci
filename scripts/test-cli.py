@@ -71,7 +71,7 @@ def main() -> None:
         extra={"JAVA_TOOL_OPTIONS": "-Dstdout.encoding=windows-1252 -Dstderr.encoding=windows-1252"},
     ).stdout
 
-    schema = run(["--dsl-schema", "--json"]).stdout
+    schema = run(["--lmcode-schema", "--json"]).stdout
     assert schema == (ROOT / "schema" / "lmoci.dsl.json").read_text(encoding="utf-8")
     parsed_schema = json.loads(schema)
     assert parsed_schema["name"] == "lmoci"
@@ -80,7 +80,7 @@ def main() -> None:
     lmscript = shutil.which("lmscript")
     assert lmscript is not None, "lmscript must be on PATH"
     sig_proc = subprocess.run(
-        [lmscript, "--dsl-signatures", str(ROOT / "schema" / "lmoci.dsl.json")],
+        [lmscript, "--lmcode-signatures", str(ROOT / "schema" / "lmoci.dsl.json")],
         text=True,
         encoding="utf-8",
         capture_output=True,
@@ -88,10 +88,10 @@ def main() -> None:
         check=False,
     )
     assert sig_proc.returncode == 0, sig_proc.stderr
-    assert sig_proc.stdout == run(["--dsl-signatures"]).stdout, "schema/registry signature mismatch"
+    assert sig_proc.stdout == run(["--lmcode-signatures"]).stdout, "schema/registry signature mismatch"
 
     host_sig_proc = subprocess.run(
-        [lmscript, "--dsl-signatures", str(ROOT / "schema" / "lmoci.dsl.json"), "--without-std"],
+        [lmscript, "--lmcode-signatures", str(ROOT / "schema" / "lmoci.dsl.json"), "--without-std"],
         text=True,
         encoding="utf-8",
         capture_output=True,
@@ -99,11 +99,11 @@ def main() -> None:
         check=False,
     )
     assert host_sig_proc.returncode == 0, host_sig_proc.stderr
-    assert host_sig_proc.stdout == run(["--dsl-signatures", "--without-std"]).stdout
+    assert host_sig_proc.stdout == run(["--lmcode-signatures", "--without-std"]).stdout
 
     run([], 2)
     run(["--nonesuch"], 2)
-    run(["--dsl", "missing-bytecode.dslb"], 3)
+    run(["--lmcode", "missing-bytecode.dslb"], 3)
 
     for raw in ["0", "-1", "wat", "1.5", "99999999999999999999999999"]:
         err = run(["--version"], 2, {"LMOCI_MAX_MEMORY_MB": raw}).stderr
@@ -126,7 +126,7 @@ def main() -> None:
         d = Path(tmp)
         bad = d / "bad.dslb"
         bad.write_bytes(b"not bytecode")
-        run(["--dsl", str(bad)], 3)
+        run(["--lmcode", str(bad)], 3)
 
         # Memory budget enforcement
         budget_lms = d / "budget.lms"
@@ -142,7 +142,7 @@ def main() -> None:
         )
         comp = subprocess.run([lmscript, str(budget_lms)], text=True, capture_output=True, timeout=60, check=False)
         assert comp.returncode == 0, comp.stderr
-        small = run(["--dsl", str(budget_dslb)], 3, {"LMOCI_MAX_MEMORY_MB": "64"})
+        small = run(["--lmcode", str(budget_dslb)], 3, {"LMOCI_MAX_MEMORY_MB": "64"})
         assert "LMOCI_MAX_MEMORY_MB" in small.stderr and "memory budget" in small.stdout
 
         # --dry-run enforcement even when pointing at an unreachable endpoint
@@ -165,7 +165,7 @@ def main() -> None:
         )
         comp = subprocess.run([lmscript, str(dry_lms)], text=True, capture_output=True, timeout=60, check=False)
         assert comp.returncode == 0, comp.stderr
-        run(["--dry-run", "--dsl", str(dry_dslb)], 0, {"LMOCI_MAX_MEMORY_MB": "128"})
+        run(["--dry-run", "--lmcode", str(dry_dslb)], 0, {"LMOCI_MAX_MEMORY_MB": "128"})
 
         # Compile and run all examples/*.lms in an isolated working copy
         work = d / "examples-work"
@@ -187,7 +187,7 @@ def main() -> None:
             assert comp.returncode == 0, (example.name, comp.stderr, comp.stdout)
         for dslb in sorted((work / "data").glob("*.dslb")):
             res = subprocess.run(
-                host_cmd() + ["--dsl", str(dslb)],
+                host_cmd() + ["--lmcode", str(dslb)],
                 cwd=str(work),
                 env=BASE_ENV,
                 text=True,

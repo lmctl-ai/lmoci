@@ -120,7 +120,7 @@ savedsl(p, {json.dumps(str(dslb))});
             assert comp.returncode == 0, comp.stderr
             env = dict(os.environ)
             env["LMOCI_ENDPOINT"] = endpoint
-            res = subprocess.run(host_cmd() + ["--dsl", str(dslb)], env=env, text=True, capture_output=True, timeout=60, check=False)
+            res = subprocess.run(host_cmd() + ["--lmcode", str(dslb)], env=env, text=True, capture_output=True, timeout=60, check=False)
             assert res.returncode == 0, (res.returncode, res.stdout, res.stderr)
 
     print(f"PASS test-ocisim.py: live CLI + DSL round-trip against ocisim at {endpoint}")
