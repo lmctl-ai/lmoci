@@ -2,8 +2,6 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gofrs/flock v0.10.0 h1:SHMXenfaB03KbroETaCMtbBg3Yn29v4w1r+tgy4ff4k=
 github.com/gofrs/flock v0.10.0/go.mod h1:FirDy1Ing0mI2+kB6wk+vyyAH+e6xiE+EYA0jnzV9jc=
-github.com/lmctl-ai/lmcode-go v0.6.39-0.20261031234045-77932bf7134a h1:czTF5Jx5o+Y4ulEI9/sA3lDqq5CN29mM7pd+K1WAhBk=
-github.com/lmctl-ai/lmcode-go v0.6.39-0.20261031234045-77932bf7134a/go.mod h1:Wfm1dj/9Uek4C4Y6LOkL5kFNRojgFUej7DDRGStSfVc=
 github.com/oracle/oci-go-sdk/v65 v65.128.0 h1:QWh0D4VsQ+94XMFy4sapwHVuW5+VOF4dom+h8/cyJsw=
 github.com/oracle/oci-go-sdk/v65 v65.128.0/go.mod h1:87yiCsoPSaOZkpt5KIEEThoSirgT8WolahE3I5/qz78=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

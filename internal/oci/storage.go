@@ -20,7 +20,8 @@ func objectPath(ns, b, k string) string {
 	return bucketPath(ns, b) + "/o/" + hostkit.EscapeKeyPath(k)
 }
 
-func (r *remote) createBucket(ctx context.Context, base, b string) (bool, error) {
+func (r *remote) CreateBucket(ctx context.Context, b string) (bool, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return false, cerr
@@ -29,19 +30,56 @@ func (r *remote) createBucket(ctx context.Context, base, b string) (bool, error)
 	if cerr != nil {
 		return false, cerr
 	}
-	body, _ := jsonBody(map[string]string{"name": b, "compartmentId": r.compartment(tenancy)})
-	resp, cerr := r.do(ctx, http.MethodPost, base, "/n/"+hostkit.EscapeSegment(ns)+"/b/", nil, body, "application/json", nil)
+	body, _ := jsonBody(map[string]any{"name": b, "compartmentId": r.compartment(tenancy), "freeformTags": tokenTags(ctx)})
+	// The create token makes the POST retry-safe: a retry after a lost reply
+	// gets 409 and the host proves ownership by reading the token back.
+	resp, cerr := r.send(ctx, hostkit.CreateToken(ctx) != "", http.MethodPost, base, "/n/"+hostkit.EscapeSegment(ns)+"/b/", nil, body, "application/json", nil)
 	if cerr != nil {
 		return false, cerr
 	}
 	if ok(resp, http.StatusOK, http.StatusCreated) {
 		return true, nil
 	}
-	// 409 BucketAlreadyExists: the host probes HeadBucket to decide owned vs foreign.
+	// 409 BucketAlreadyExists: the host probes HeadBucket and BucketCreateToken.
 	return false, classify(resp, scopeBucket)
 }
 
-func (r *remote) deleteBucket(ctx context.Context, base, b string) error {
+// createTokenTag is the freeform tag that carries hostkit.CreateToken(ctx),
+// written in the same CreateBucket/CreateQueue request (atomic with creation).
+const createTokenTag = "lmcloud-create-token"
+
+func tokenTags(ctx context.Context) map[string]string {
+	if t := hostkit.CreateToken(ctx); t != "" {
+		return map[string]string{createTokenTag: t}
+	}
+	return map[string]string{}
+}
+
+// BucketCreateToken implements hostkit.BucketCreateTokenReader.
+func (r *remote) BucketCreateToken(ctx context.Context, b string) (string, error) {
+	base := hostkit.EndpointFrom(ctx)
+	ns, cerr := r.namespaceFor(ctx, base)
+	if cerr != nil {
+		return "", cerr
+	}
+	resp, cerr := r.do(ctx, http.MethodGet, base, bucketPath(ns, b), nil, nil, "", nil)
+	if cerr != nil {
+		return "", cerr
+	}
+	if resp.Status != http.StatusOK {
+		return "", classify(resp, scopeBucket)
+	}
+	var out struct {
+		FreeformTags map[string]string `json:"freeformTags"`
+	}
+	if cerr := decode(resp, &out); cerr != nil {
+		return "", cerr
+	}
+	return out.FreeformTags[createTokenTag], nil
+}
+
+func (r *remote) DeleteBucket(ctx context.Context, b string) error {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return cerr
@@ -59,7 +97,8 @@ func (r *remote) deleteBucket(ctx context.Context, base, b string) error {
 
 // headBucket uses GET (not HEAD) so the JSON body distinguishes BucketNotFound
 // from NotAuthorizedOrNotFound.
-func (r *remote) headBucket(ctx context.Context, base, b string) error {
+func (r *remote) HeadBucket(ctx context.Context, b string) error {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return cerr
@@ -74,7 +113,8 @@ func (r *remote) headBucket(ctx context.Context, base, b string) error {
 	return classify(resp, scopeBucket)
 }
 
-func (r *remote) listBuckets(ctx context.Context, base, token string) ([]string, string, error) {
+func (r *remote) ListBuckets(ctx context.Context, token string) ([]string, string, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return nil, "", cerr
@@ -110,7 +150,8 @@ func (r *remote) listBuckets(ctx context.Context, base, token string) ([]string,
 	return names, resp.Header.Get("opc-next-page"), nil
 }
 
-func (r *remote) putObject(ctx context.Context, base, b, k string, body []byte, ct string, meta map[string]string) (hostkit.ObjectMeta, error) {
+func (r *remote) PutObject(ctx context.Context, b, k string, body []byte, ct string, meta map[string]string) (hostkit.ObjectMeta, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return hostkit.ObjectMeta{}, cerr
@@ -133,7 +174,8 @@ func (r *remote) putObject(ctx context.Context, base, b, k string, body []byte, 
 	return hostkit.ObjectMeta{Exists: true, ETag: etag, ContentType: ct, Metadata: meta}, nil
 }
 
-func (r *remote) getObject(ctx context.Context, base, b, k string, limit int64) ([]byte, error) {
+func (r *remote) GetObject(ctx context.Context, b, k string, limit int64) ([]byte, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return nil, cerr
@@ -154,7 +196,8 @@ func (r *remote) getObject(ctx context.Context, base, b, k string, limit int64) 
 // headObject issues HEAD. OCI HEAD errors carry no body and (on ocisim) no
 // opc-error-code, so a code-less 404 is re-issued as a one-byte ranged GET to
 // learn whether it means ObjectNotFound, BucketNotFound or NotAuthorizedOrNotFound.
-func (r *remote) headObject(ctx context.Context, base, b, k string) (hostkit.ObjectMeta, error) {
+func (r *remote) HeadObject(ctx context.Context, b, k string) (hostkit.ObjectMeta, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return hostkit.ObjectMeta{}, cerr
@@ -171,7 +214,7 @@ func (r *remote) headObject(ctx context.Context, base, b, k string) (hostkit.Obj
 		}
 		if ok(resp, http.StatusOK, http.StatusPartialContent) {
 			// It exists after all (race); report it via a fresh HEAD.
-			return r.headObject(ctx, base, b, k)
+			return r.HeadObject(ctx, b, k)
 		}
 		if resp.Status == http.StatusNotFound && errorCode(resp) == "" {
 			return hostkit.ObjectMeta{}, hostkit.ProviderError(hostkit.PermissionDenied, 404, "", "object HEAD returned an unclassifiable 404")
@@ -193,7 +236,8 @@ func (r *remote) headObject(ctx context.Context, base, b, k string) (hostkit.Obj
 	return hostkit.ObjectMeta{Exists: true, Size: size, ETag: resp.Header.Get("ETag"), ContentType: resp.Header.Get("Content-Type"), Metadata: meta}, nil
 }
 
-func (r *remote) deleteObject(ctx context.Context, base, b, k string) error {
+func (r *remote) DeleteObject(ctx context.Context, b, k string) error {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return cerr
@@ -210,7 +254,8 @@ func (r *remote) deleteObject(ctx context.Context, base, b, k string) error {
 
 // listObjects uses OCI start keys: start is inclusive and nextStartWith names
 // the first key of the next page, so it is a valid continuation token.
-func (r *remote) listObjects(ctx context.Context, base, b, prefix string, max int, token string) (hostkit.ObjectPage, error) {
+func (r *remote) ListObjects(ctx context.Context, b, prefix string, max int, token string) (hostkit.ObjectPage, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ns, cerr := r.namespaceFor(ctx, base)
 	if cerr != nil {
 		return hostkit.ObjectPage{}, cerr

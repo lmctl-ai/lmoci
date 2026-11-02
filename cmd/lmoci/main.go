@@ -9,8 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	lmcode "github.com/lmctl-ai/lmcode-go"
+	"strings"
 
 	"github.com/lmctl-ai/lmcloud/hostkit/cloudhost"
 	"github.com/lmctl-ai/lmcloud/hostkit/invoke"
@@ -24,78 +23,28 @@ const Version = "0.1.0"
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout)) }
 
-func run(args []string, out io.Writer) int {
-	// `lmoci cloud ...` selects the shared schema (the only schema served).
-	if len(args) > 0 && args[0] == "cloud" {
-		args = args[1:]
-	}
-	switch {
-	case len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "-h")):
-		printHelp(out)
-		return 0
-	case len(args) == 1 && (args[0] == "--version" || args[0] == "-V"):
-		fmt.Fprintf(out, "lmoci %s\n", Version)
-		return 0
-	case len(args) == 1 && args[0] == "--notices":
-		printNotices(out)
-		return 0
-	case args[0] == "--lmcode-schema" && (len(args) == 1 || (len(args) == 2 && args[1] == "--json")):
-		_, _ = out.Write(schema.Bytes)
-		return 0
-	case args[0] == "--lmcode-signatures" && (len(args) == 1 || (len(args) == 2 && args[1] == "--without-std")):
-		return signatures(out, len(args) == 2)
-	case invoke.IsInvocation(args):
-		return invocation(args, out)
-	}
-	return invoke.Failure("cli", lmcode.NewError(lmcode.CLI_USAGE, fmt.Sprintf("unknown or malformed arguments: %q (see lmoci --help)", args)))
-}
-
-func signatures(out io.Writer, withoutStd bool) int {
-	reg := lmcode.NewRegistry()
-	if withoutStd {
-		reg = lmcode.NewRegistryWithoutStd()
-	}
-	if err := cloudhost.Register(reg, io.Discard); err != nil {
-		return invoke.Failure("app", lmcode.NewError(lmcode.APP_FAIL, err.Error()))
-	}
-	sigs := reg.Signatures()
-	if withoutStd {
-		sigs = reg.HostSignatures()
-	}
-	for _, s := range sigs {
-		fmt.Fprintln(out, s)
-	}
-	return 0
-}
-
-// invocation mirrors cloudhost.Program.Main but adds lmoci's memory budget
-// hooks (Program has no Hooks field; see durable-memory/go-port-findings.md).
-func invocation(args []string, out io.Writer) int {
-	if _, err := membudget.InitFromEnv(); err != nil {
-		return invoke.Failure("cli", lmcode.NewError(lmcode.CLI_USAGE, err.Error()))
-	}
-	inv, err := invoke.ParseArgs(args)
-	if err != nil {
-		return invoke.Failure("cli", err)
-	}
-	reg, err := cloudhost.NewRegistry(out)
-	if err != nil {
-		return invoke.Failure("app", lmcode.NewError(lmcode.APP_FAIL, err.Error()))
-	}
-	contract, err := lmcode.ResultContractFromSchema(schema.Bytes)
-	if err != nil {
-		return invoke.Failure("load", err)
-	}
-	adapter := oci.New(nil)
-	ctx := lmcode.NewContext()
-	ctx.Set("cloud", cloudhost.New(cloudhost.Config{Provider: "oci", Store: adapter, Queue: adapter, Endpoints: oci.Endpoints()}))
-	runner := &invoke.Runner{
-		Results: inv.Results, Registry: reg, Schema: schema.Bytes, Contract: contract, Context: ctx,
-		Order: inv.Order, Dry: inv.Dry, Builder: inv.Builder, Out: out,
+// program is lmoci's CLI: hostkit's Program with the OCI adapter, lmoci's
+// help/notices and the memory budget (Init) + watchdog (Hooks).
+func program(out io.Writer) cloudhost.Program {
+	var help, notices strings.Builder
+	printHelp(&help)
+	printNotices(&notices)
+	return cloudhost.Program{
+		Name: "lmoci", Version: Version, Schema: schema.Bytes, Out: out,
+		Help: help.String(), Notices: notices.String(),
+		Init: func() error {
+			_, err := membudget.InitFromEnv()
+			return err
+		},
 		Hooks: invoke.Hooks{BeforeRun: membudget.ResetRun, StartWatchdog: membudget.StartWatchdog},
+		NewConfig: func(bool) (cloudhost.Config, error) {
+			adapter := oci.New(nil)
+			return cloudhost.Config{Provider: "oci", Store: adapter, Queue: adapter, Endpoints: oci.Endpoints()}, nil
+		},
 	}
-	return runner.Execute()
 }
+
+func run(args []string, out io.Writer) int { return program(out).Main(args) }
 
 func printHelp(w io.Writer) {
 	fmt.Fprintf(w, `lmoci %s — Go lmcode host for OCI (shared lmcloud schema, built on lmcloud hostkit)

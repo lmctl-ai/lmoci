@@ -19,3 +19,9 @@ require (
 )
 
 replace github.com/lmctl-ai/lmcloud => ../lmcloud
+
+// TEMPORARY: lmcode-go Registry.Enum (dry runs that evaluate ErrorCode) is not
+// published yet; ../lmcode-go-patched is branch dry-enum-string (23ff76b).
+// Remove when Registry.Enum is merged upstream and the lmcode-go pin above and
+// sdk.lock are bumped (hostkit's go.mod has the same line).
+replace github.com/lmctl-ai/lmcode-go => ../lmcode-go-patched

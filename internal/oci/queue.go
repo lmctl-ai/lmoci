@@ -143,7 +143,8 @@ func (r *remote) waitWorkRequest(ctx context.Context, base string, resp *respons
 	}
 }
 
-func (r *remote) createQueue(ctx context.Context, base, name string) (bool, error) {
+func (r *remote) CreateQueue(ctx context.Context, name string) (bool, error) {
+	base := hostkit.EndpointFrom(ctx)
 	_, cerr := r.lookupQueue(ctx, base, name)
 	if cerr == nil {
 		return false, nil
@@ -155,10 +156,19 @@ func (r *remote) createQueue(ctx context.Context, base, name string) (bool, erro
 	if cerr != nil {
 		return false, cerr
 	}
-	body, _ := jsonBody(map[string]string{"compartmentId": r.compartment(tenancy), "displayName": name})
+	body, _ := jsonBody(map[string]any{"compartmentId": r.compartment(tenancy), "displayName": name, "freeformTags": tokenTags(ctx)})
+	// OCI does not de-duplicate queue names, so the POST is never retried. If
+	// the reply is lost (transport error or 5xx) and a queue with this name is
+	// now visible, report CONFLICT: the host resolves it with QueueCreateToken.
 	resp, cerr := r.do(ctx, http.MethodPost, base, queueAPI+"/queues", nil, body, "application/json", nil)
-	if cerr != nil {
-		return false, cerr
+	if cerr != nil || resp.Status >= 500 {
+		if lost := r.lostCreate(ctx, base, name); lost != nil {
+			return false, lost
+		}
+		if cerr != nil {
+			return false, cerr
+		}
+		return false, classify(resp, scopeQueue)
 	}
 	if !ok(resp, http.StatusOK, http.StatusAccepted) {
 		return false, classify(resp, scopeQueue)
@@ -174,7 +184,8 @@ func (r *remote) createQueue(ctx context.Context, base, name string) (bool, erro
 	return true, nil
 }
 
-func (r *remote) deleteQueue(ctx context.Context, base, name string) error {
+func (r *remote) DeleteQueue(ctx context.Context, name string) error {
+	base := hostkit.EndpointFrom(ctx)
 	ref, cerr := r.lookupQueue(ctx, base, name)
 	if cerr != nil {
 		return cerr
@@ -195,7 +206,8 @@ func (r *remote) deleteQueue(ctx context.Context, base, name string) error {
 	return nil
 }
 
-func (r *remote) listQueues(ctx context.Context, base, token string) ([]string, string, error) {
+func (r *remote) ListQueues(ctx context.Context, token string) ([]string, string, error) {
+	base := hostkit.EndpointFrom(ctx)
 	items, next, cerr := r.listQueuePage(ctx, base, "", token)
 	if cerr != nil {
 		return nil, "", cerr
@@ -217,7 +229,8 @@ func messagePath(ref queueRef, receipt string) string {
 	return p
 }
 
-func (r *remote) send(ctx context.Context, base, name, wire string) (string, error) {
+func (r *remote) Send(ctx context.Context, name, wire string) (string, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ref, cerr := r.lookupQueue(ctx, base, name)
 	if cerr != nil {
 		return "", cerr
@@ -244,7 +257,8 @@ func (r *remote) send(ctx context.Context, base, name, wire string) (string, err
 	return out.Messages[0].ID.String(), nil
 }
 
-func (r *remote) receive(ctx context.Context, base, name string, max, wait, vis int) ([]hostkit.RawMessage, error) {
+func (r *remote) Receive(ctx context.Context, name string, max, wait, vis int) ([]hostkit.RawMessage, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ref, cerr := r.lookupQueue(ctx, base, name)
 	if cerr != nil {
 		return nil, cerr
@@ -274,7 +288,8 @@ func (r *remote) receive(ctx context.Context, base, name string, max, wait, vis 
 	return msgs, nil
 }
 
-func (r *remote) ack(ctx context.Context, base, name, receipt string) error {
+func (r *remote) Ack(ctx context.Context, name, receipt string) error {
+	base := hostkit.EndpointFrom(ctx)
 	ref, cerr := r.lookupQueue(ctx, base, name) // missing queue wins over a bad receipt
 	if cerr != nil {
 		return cerr
@@ -290,7 +305,8 @@ func (r *remote) ack(ctx context.Context, base, name, receipt string) error {
 }
 
 // nack: OCI UpdateMessage keeps the receipt valid, so the same receipt is returned.
-func (r *remote) nack(ctx context.Context, base, name, receipt string, vis int) (string, error) {
+func (r *remote) Nack(ctx context.Context, name, receipt string, vis int) (string, error) {
+	base := hostkit.EndpointFrom(ctx)
 	ref, cerr := r.lookupQueue(ctx, base, name)
 	if cerr != nil {
 		return "", cerr
@@ -304,4 +320,51 @@ func (r *remote) nack(ctx context.Context, base, name, receipt string, vis int) 
 		return receipt, nil
 	}
 	return "", classify(resp, scopeMessage)
+}
+
+// lostCreate checks, after an ambiguous CreateQueue reply, whether a queue
+// with this name now exists; if so it returns CONFLICT for token resolution.
+func (r *remote) lostCreate(ctx context.Context, base, name string) *hostkit.CloudError {
+	r.forget(base, name)
+	if _, cerr := r.lookupQueue(ctx, base, name); cerr == nil {
+		return hostkit.ProviderError(hostkit.Conflict, 409, "QueueAlreadyExists", "queue exists after an ambiguous create reply")
+	}
+	return nil
+}
+
+// LookupQueue implements hostkit.Queue.
+func (r *remote) LookupQueue(ctx context.Context, name string) error {
+	if _, cerr := r.lookupQueue(ctx, hostkit.EndpointFrom(ctx), name); cerr != nil {
+		return cerr
+	}
+	return nil
+}
+
+// QueueCaps: OCI GetMessages long-polls (timeoutInSeconds) and carries content
+// as a JSON string, so the host applies the __lmcloud_b64__ envelope.
+func (r *remote) QueueCaps() hostkit.QueueCaps {
+	return hostkit.QueueCaps{LongPoll: true, TextOnlyWire: true}
+}
+
+// QueueCreateToken implements hostkit.QueueCreateTokenReader (GetQueue freeformTags).
+func (r *remote) QueueCreateToken(ctx context.Context, name string) (string, error) {
+	base := hostkit.EndpointFrom(ctx)
+	ref, cerr := r.lookupQueue(ctx, base, name)
+	if cerr != nil {
+		return "", cerr
+	}
+	resp, cerr := r.do(ctx, http.MethodGet, base, queueAPI+"/queues/"+hostkit.EscapeSegment(ref.ID), nil, nil, "", nil)
+	if cerr != nil {
+		return "", cerr
+	}
+	if resp.Status != http.StatusOK {
+		return "", classify(resp, scopeQueue)
+	}
+	var out struct {
+		FreeformTags map[string]string `json:"freeformTags"`
+	}
+	if cerr := decode(resp, &out); cerr != nil {
+		return "", cerr
+	}
+	return out.FreeformTags[createTokenTag], nil
 }

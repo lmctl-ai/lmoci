@@ -169,6 +169,13 @@ type response struct {
 // is used only for signing, so no SDK retries can multiply attempts). The
 // body is read with ReadBounded: oversize replies fail instead of truncating.
 func (r *remote) do(ctx context.Context, method, base, path string, query url.Values, body []byte, contentType string, headers map[string]string) (*response, *hostkit.CloudError) {
+	return r.send(ctx, hostkit.IdempotentMethod(method), method, base, path, query, body, contentType, headers)
+}
+
+// send is do with an explicit retry-safety flag (a POST is retry-safe only
+// when a retry is resolved by the provider, e.g. a bucket create that turns
+// into 409 + create-token proof).
+func (r *remote) send(ctx context.Context, idempotent bool, method, base, path string, query url.Values, body []byte, contentType string, headers map[string]string) (*response, *hostkit.CloudError) {
 	kp, _, cerr := r.credentials()
 	if cerr != nil {
 		return nil, cerr
@@ -185,7 +192,6 @@ func (r *remote) do(ctx context.Context, method, base, path string, query url.Va
 	if query != nil {
 		target.RawQuery = query.Encode()
 	}
-	idempotent := method != http.MethodPost
 	resp, _, err := r.retry.DoHTTP(ctx, r.client, idempotent, func(ctx context.Context) (*http.Request, error) {
 		var rd io.Reader
 		if body != nil {
@@ -218,9 +224,8 @@ func (r *remote) do(ctx context.Context, method, base, path string, query url.Va
 		return nil, hostkit.ProviderError(hostkit.Internal, 0, "", "OCI request failed: "+err.Error())
 	}
 	defer resp.Body.Close()
-	data, cerr := hostkit.ReadBounded(resp.Body, maxBody)
+	data, cerr := hostkit.ReadBoundedResponse(resp, maxBody)
 	if cerr != nil {
-		cerr.HTTPStatus = resp.StatusCode
 		return nil, cerr
 	}
 	return &response{Status: resp.StatusCode, Header: resp.Header, Body: data}, nil
