@@ -43,3 +43,68 @@ Following `~/lmctl-mono/lmscript/durable-memory/dsl-framework.md` (and the `lmor
   ```
   Whereas IAM policy denial in `ocisim --auth enforce` (`OciAuthFilter.java` line 210) returns HTTP `403` with `{"code": "NotAuthorizedOrNotFound", "message": "Authorization failed or requested resource not found."}`.
 - **Resolution in `lmoci`**: Because `QueueAck` and `QueueNack` first resolve the queue OCID via `ListQueues` (which authenticates the caller, checks queue permission, and verifies the queue exists), a subsequent HTTP `404` on `/messages/{receipt}` means the receipt itself is stale/unknown (`ErrorCode.OK` for idempotent `queue_ack`; `ErrorCode.INVALID_ARGUMENT` for `queue_nack`), while HTTP `403` maps to `ErrorCode.PERMISSION_DENIED`.
+
+---
+
+## hostkit port (branch `hostkit-port`, 2026-11-02)
+
+The Go host now keeps only OCI-specific code: `internal/oci` (adapter, signing, simulator
+credentials, OCI REST, error classification) and `cmd/lmoci` (CLI surface + memory watchdog).
+Validation, codec, retry, endpoint policy, pagination, error model/abort format, invoke loop,
+registrations and dry handling come from `github.com/lmctl-ai/lmcloud/hostkit` (branch
+`shared-go`, local `replace => ../lmcloud`). The old `internal/host`, `internal/invoke` and
+`internal/safety` packages and the bespoke `--dry`, `--manifest`, `--endpoint`, `--region`,
+`--sweep` flags are gone; the resolutions recorded above for `internal/host/*` are superseded.
+
+### OCI adapter behaviour
+- Routing per call by the endpoint hostkit resolved: none + `LMOCI_LIVE` unset → offline
+  in-process fake (hostkit `fakeadapter`); none + `LMOCI_LIVE=1`, or any non-loopback endpoint →
+  `UNAUTHENTICATED`/`LiveCredentialsNotImplemented` (TODO: OCI_* env + `~/.oci/config` chain);
+  loopback → signed OCI REST (oci-go-sdk used for signing only, so no SDK retries).
+- Simulator credentials (spec 02 M3): `LMOCI_SIM_KEY_ID` + `LMOCI_SIM_PRIVATE_KEY_PATH` (PEM,
+  64 KiB cap), else a synthetic open-mode keyId with an ephemeral key; `LMOCI_SIM_NAMESPACE`
+  (else `GET /n/`; `floci-local` only when `/n/` is an unknown route); `LMOCI_SIM_COMPARTMENT_ID`
+  (else the keyId's tenancy). The old `LMOCI_TENANCY/USER/FINGERPRINT/PRIVATE_KEY*` and `OCI_CLI_*`
+  aliases and the loopback-403 namespace fallback were removed.
+- Classification: 401 → UNAUTHENTICATED; 403 and 404 `NotAuthorizedOrNotFound` → PERMISSION_DENIED;
+  `BucketNotFound`/`ObjectNotFound` → NOT_FOUND bucket/object; 404 on queue routes → NOT_FOUND queue;
+  409 → CONFLICT (non-empty delete is a native 409 `Conflict`, no pre-list); 429/5xx → INTERNAL.
+- Object HEAD: ocisim HEAD 404s carry no code (no body, no `opc-error-code`), so a code-less 404 is
+  re-issued as `GET` with `Range: bytes=0-0` to read the code; still code-less → PERMISSION_DENIED.
+- Receipts quirk (narrow): ocisim answers ack/nack of a stale or unknown receipt with
+  `404 NotAuthorizedOrNotFound` "No in-flight message for receipt: …". Only that message on a message
+  route is classified NOT_FOUND/message (hostkit then makes re-ack OK and nack INVALID_ARGUMENT); every
+  other `NotAuthorizedOrNotFound` stays PERMISSION_DENIED. Live OCI behaviour here is unverified.
+- Queues: displayName → OCID lookup follows `opc-next-page` and counts only ACTIVE queues; create and
+  delete wait for the `opc-work-request-id` work request (`SUCCEEDED`; `FAILED`/`CANCELED` → INTERNAL);
+  data plane stays on a loopback override, otherwise uses the queue's `messagesEndpoint` after
+  `hostkit.ValidateEndpoint`. `UpdateMessage` keeps the receipt, so nack returns it unchanged.
+- Never fabricated: missing message id, ETag, Content-Length or undecodable bodies → INTERNAL.
+
+### hostkit contract feedback (no hostkit change was needed)
+1. **Typed-nil trap**: adapter methods return `error`; returning a nil `*hostkit.CloudError` through
+   `error` yields a non-nil interface and hostkit reports `[INTERNAL] … : OK`. Hit in `deleteQueue`
+   (`return r.waitWorkRequest(...)`). Suggest `AsCloudError` treat a typed-nil `*CloudError` as success,
+   or adapter methods return `*CloudError`.
+2. **`cloudhost.Program` lacks `invoke.Hooks`** (memory watchdog, BeforeRun) and host CLI extras
+   (`--lmcode-signatures --without-std`, `--help`, `--notices`, the `cloud` word): lmoci re-assembles
+   ~30 lines of `Program.Main` from exported pieces. Suggest `Program.Hooks` and an extra-flag callback.
+3. **No offline routing concept**: `""` means "live default" in the contract, but hosts that keep an
+   offline fake need a per-call router, which is 17 near-identical methods (most of `adapter.go`).
+   Suggest a `hostkit.Router{Offline, Remote, Pick(ctx)}` helper.
+4. **`QueueCaps` is global**: the offline fake does not long-poll while OCI does, so offline mode
+   ignores `wait_seconds`. Caps should be per route (or the router should apply `WaitLoop` itself).
+5. **Retry of non-idempotent POST on 5xx** (spec 02 §5.2): a 500 after OCI created the bucket turns into
+   409 → probe → `false` instead of `true`; a retried PutMessages may enqueue twice (at-least-once). Spec
+   decision, recorded here.
+6. `ReadBounded` reports http=0; adapters must copy the response status in (done here).
+
+### Verification on this branch
+`./test-go.sh`: build, linkage, CLI, lock-pinned schema bytes served, signature parity, failure exit
+codes, offline smoke, HTTP-spy dry-run proof (0 mutating requests under `lmscript --dry-run`; control
+real run does POST), `go vet`, `go test -race -count=3`, open ocisim conformance 25/25 (2 SKIP), and —
+with `OCISIM_AUTH_JAR`/`OCISIM_AUTH_CONFIG` and the allow/deny keys — enforced conformance 25/25 (0 SKIP).
+Adapter tests cover the classification table, 503 retried 3x → INTERNAL, 33,562,624-byte body
+rejected, HEAD denial never absent, stalled list token, paged queue lookup, work-request wait/failure,
+the narrow receipt quirk, missing message id, simulator credentials/scope and endpoint routing
+(0.0.0.0 rejected before any request; live/non-loopback → not implemented; none → offline).

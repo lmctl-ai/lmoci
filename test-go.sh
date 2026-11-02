@@ -5,6 +5,9 @@ set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
+# Tests select fake/loopback mode explicitly: never inherit live or endpoint overrides.
+unset LMOCI_LIVE LMCLOUD_ENDPOINT LMCLOUD_STORAGE_ENDPOINT LMCLOUD_QUEUE_ENDPOINT \
+  LMOCI_ENDPOINT LMOCI_STORAGE_ENDPOINT LMOCI_QUEUE_ENDPOINT OCI_ENDPOINT OCI_OBJECT_STORAGE_ENDPOINT OCI_QUEUE_ENDPOINT
 
 LMSCRIPT_BIN="${LMSCRIPT_BIN:-/home/ubuntu/lmctl-mono/lmscript/bin/lmscript}"
 LMCLOUD_DIR="${LMCLOUD_DIR:-/home/ubuntu/cloud/lmcloud}"
@@ -44,6 +47,10 @@ VER=$("$BIN" --version)
 grep -q "77932bf7134af4c330fa1eee16c7e10c1fb1a1d7" sdk.lock
 grep -q "77932bf7134a" go.mod
 ./scripts/sync-lmcloud-schema.sh --verify
+# The bytes the host serves come from hostkit's schema package; they must match the lmcloud.lock pin.
+want_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' lmcloud.lock)"
+got_sha="$("$BIN" --lmcode-schema --json | sha256sum | awk '{print $1}')"
+[[ "$got_sha" == "$want_sha" ]] || { echo "served schema sha256 $got_sha != lmcloud.lock $want_sha" >&2; exit 1; }
 
 echo "==> [4/9] Checking --lmcode-schema [--json] byte parity (top-level and 'cloud' subcommand)"
 cmp -s <("$BIN" --lmcode-schema) "$ROOT/schema/lmcloud.dsl.json"
@@ -90,26 +97,46 @@ p = _lmcode_ s;
 end _lmcode_
 r_real = run_lmcode(p, {command:["./bin/lmoci", "--lmcode", "$DSLFILE"]});
 assert(r_real.ok && r_real.result.prov == "oci" && r_real.result.created && r_real.result.exists && r_real.result.deleted, "real smoke failed");
-r_dry = run_lmcode(p, {command:["./bin/lmoci", "cloud", "--dry", "--lmcode", "$DSLFILE"]});
-assert(r_dry.ok && r_dry.result.prov == "oci" && !r_dry.result.exists, "dry smoke failed");
 '
 
-echo "==> [8/9] Running go vet ./... and go test ./..."
+echo "==> [7b/9] Dry-run proof: lmscript --dry-run makes zero mutating OCI requests (HTTP spy)"
+python3 scripts/test-dry-spy.py "$LMSCRIPT_BIN" "$BIN" "$ROOT/schema/lmcloud.dsl.json"
+
+echo "==> [8/9] Running go vet ./... and go test -race -count=3 ./..."
 go vet ./...
-go test ./...
+go test -race -count=3 ./...
 
 if [[ -x "$SIM_SH" && -x "$LMCLOUD_DIR/tests/run-conformance.sh" ]]; then
   echo "==> [9/9] Running lmcloud object-storage + queue conformance against ocisim"
+  SIM_NAME="${LMOCI_SIM_NAME:-lmoci-test-$$}"
   cleanup_sim() {
-    "$SIM_SH" stop oci >/dev/null 2>&1 || true
+    "$SIM_SH" stop oci --name "$SIM_NAME" >/dev/null 2>&1 || true
   }
   trap cleanup_sim EXIT
-  ENDPOINT=$("$SIM_SH" start oci)
+  ENDPOINT=$("$SIM_SH" start oci --name "$SIM_NAME" --free-port)
   LMSCRIPT_BIN="$LMSCRIPT_BIN" "$LMCLOUD_DIR/tests/run-conformance.sh" "$BIN" "$ENDPOINT" all
   cleanup_sim
   trap - EXIT
 else
   echo "==> [9/9] Skipping ocisim conformance (sim.sh or lmcloud repo not found)"
+fi
+
+# Optional: enforced conformance against an auth-capable ocisim JVM build.
+#   OCISIM_AUTH_JAR=.../quarkus-run.jar OCISIM_AUTH_CONFIG=auth.json [OCISIM_JAVA=java]
+#   LMOCI_SIM_KEY_ID / LMOCI_SIM_PRIVATE_KEY_PATH            (allowed principal)
+#   LMCLOUD_ENFORCE_DENIED_OCI_KEY_ID / ..._PRIVATE_KEY_PATH  (policy-denied principal)
+if [[ -n "${OCISIM_AUTH_JAR:-}" && -n "${OCISIM_AUTH_CONFIG:-}" ]]; then
+  echo "==> [10/10] Running conformance against auth-enforced ocisim (expects 0 skips)"
+  PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  ENF_LOG=$(mktemp)
+  "${OCISIM_JAVA:-java}" -jar "$OCISIM_AUTH_JAR" serve --port "$PORT" --auth enforce --auth-config "$OCISIM_AUTH_CONFIG" >"$ENF_LOG" 2>&1 &
+  ENF_PID=$!
+  trap 'kill $ENF_PID 2>/dev/null || true; wait $ENF_PID 2>/dev/null || true; rm -f "$ENF_LOG"' EXIT
+  for _ in $(seq 1 120); do curl -s -o /dev/null "http://127.0.0.1:$PORT/n/" && break; sleep 0.5; done
+  OUT=$(LMSCRIPT_BIN="$LMSCRIPT_BIN" "$LMCLOUD_DIR/tests/run-conformance.sh" "$BIN" "http://127.0.0.1:$PORT" all)
+  echo "$OUT"
+  grep -q "skip 0, fail 0" <<<"$OUT" || { echo "enforced conformance did not run every scenario" >&2; exit 1; }
+  kill $ENF_PID 2>/dev/null || true; wait $ENF_PID 2>/dev/null || true; rm -f "$ENF_LOG"; trap - EXIT
 fi
 
 echo "ALL GO HOST CHECKS PASSED"
