@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Prove that `lmscript --dry-run` reaches lmoci as a dry invocation and makes
-ZERO mutating provider requests: a loopback HTTP spy answers OCI read routes
+"""Prove that `lmscript --dry-run` reaches lmoci as a dry invocation, can
+evaluate cloud.last_error().code() (hostkit v3 + lmcode-go Registry.Enum), and
+makes ZERO mutating provider requests: a loopback HTTP spy answers OCI read routes
 and records every request. A real run of the same program must POST (control)."""
 import http.server, json, os, subprocess, sys, tempfile, threading
 
@@ -40,6 +41,7 @@ s = load_schema(schema={json.dumps(SCHEMA)});
 p = _lmcode_ s;
   cloud.set_endpoint("all", {json.dumps(ep)});
   let created = cloud.bucket_create("lmoci-dry-spy");
+  let code_ok = cloud.last_error().code() == ErrorCode.OK;
   let m = cloud.object_put("lmoci-dry-spy", "k.txt", "payload", "text/plain", str_map().set("env", "dev"));
   let body = cloud.object_get("lmoci-dry-spy", "k.txt");
   cloud.object_delete("lmoci-dry-spy", "k.txt");
@@ -49,6 +51,7 @@ p = _lmcode_ s;
   let batch = cloud.queue_receive("lmoci-dry-spy-q", 1, 0, 30);
   let qd = cloud.queue_delete("lmoci-dry-spy-q");
   lmcode_return_put("created", created);
+  lmcode_return_put("code_ok", code_ok);
   lmcode_return_put("body", body);
   lmcode_return_put("qc", qc);
   lmcode_return_put("n", batch.len());
@@ -68,7 +71,9 @@ srv.shutdown()
 
 mut = [s for s in dry_seen if s[0] in ("POST", "PUT", "DELETE")]
 print(f"dry run: rc={dry.returncode} requests={len(dry_seen)} mutating={len(mut)}")
-if dry.returncode != 0 or mut or not dry_seen or '"dry":true' not in dry.stdout:
+code_ok = '"code_ok":true' in dry.stdout
+print(f"dry run evaluated last_error().code() == ErrorCode.OK: {code_ok}")
+if dry.returncode != 0 or mut or not dry_seen or '"dry":true' not in dry.stdout or not code_ok:
     print(dry.stdout, dry.stderr, dry_seen, file=sys.stderr)
     sys.exit("FAIL: dry run made mutating requests or did not reach the host in dry mode")
 if not any(s[0] == "POST" for s in real_seen):

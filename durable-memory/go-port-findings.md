@@ -108,3 +108,25 @@ Adapter tests cover the classification table, 503 retried 3x → INTERNAL, 33,56
 rejected, HEAD denial never absent, stalled list token, paged queue lookup, work-request wait/failure,
 the narrow receipt quirk, missing message id, simulator credentials/scope and endpoint routing
 (0.0.0.0 rejected before any request; live/non-loopback → not implemented; none → offline).
+
+## hostkit v3 adoption (2026-11-02)
+
+- **Routing:** `internal/oci/adapter.go` is now `hostkit.Router{Pick: hostkit.EndpointRoutes{Offline: fake,
+  Sim: remote, UseLive: LMOCI_LIVE=1, Unavailable: live-not-implemented}}`; the 17 hand-written routing
+  methods are gone and the remote implements the hostkit interfaces directly (endpoint from ctx).
+- **Per-route caps:** offline fake short-polls (host wait loop: empty `queue_receive(q,1,1,30)` takes ~1 s),
+  ocisim route long-polls (`timeoutInSeconds`); previously the offline route claimed LongPoll and returned at once.
+- **CLI:** `cmd/lmoci` uses `cloudhost.Program` (`Init` = memory budget, `Hooks` = watchdog, `Help`, `Notices`).
+- **Create ownership:** CreateBucket/CreateQueue send `freeformTags.lmcloud-create-token =
+  hostkit.CreateToken(ctx)` in the create request; `BucketCreateToken` (GET bucket) and `QueueCreateToken`
+  (GetQueue) read it back (ocisim stores and returns freeformTags on both). The token makes the bucket POST
+  retry-safe (a retry after a lost reply gets 409 and is proven by token); the queue POST is never retried
+  (OCI allows duplicate displayNames) — after an ambiguous reply the adapter re-looks-up the name and reports
+  CONFLICT so hostkit resolves ownership by token. Creation timers are not used.
+- **Dry enums:** go.mod replaces lmcode-go with `../lmcode-go-patched` (temporary; remove when `Registry.Enum`
+  is upstream and pins are bumped). `scripts/test-dry-spy.py` asserts a dry run evaluates
+  `last_error().code() == ErrorCode.OK` with zero mutating requests.
+- **Tests:** httpguard-based 503×3, oversize (http=200 kept), cross-origin redirect (no signature reaches the
+  foreign origin), send hang-up not retried; token ownership (plain, pre-existing, lost reply) for buckets and
+  queues; per-route caps. `test-go.sh`: open 25/25 (2 SKIP), enforced 25/25 (0 SKIP), race ×3.
+- No hostkit v3 bug found during adoption.
