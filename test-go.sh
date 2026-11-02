@@ -11,7 +11,7 @@ unset LMOCI_LIVE LMCLOUD_ENDPOINT LMCLOUD_STORAGE_ENDPOINT LMCLOUD_QUEUE_ENDPOIN
 
 LMSCRIPT_BIN="${LMSCRIPT_BIN:-/home/ubuntu/lmctl-mono/lmscript/bin/lmscript}"
 LMCLOUD_DIR="${LMCLOUD_DIR:-/home/ubuntu/cloud/lmcloud}"
-SIM_SH="${SIM_SH:-/home/ubuntu/cloud/lmcloud-sims/scripts/sim.sh}"
+SIM_SH="${SIM_SH:-${LMCLOUD_DIR:-/home/ubuntu/cloud/lmcloud}/scripts/sim.sh}"
 export LMCLOUD_SIM_DIR="${LMCLOUD_SIM_DIR:-/home/ubuntu/cloud/lmcloud-sims/.cache/sims}"
 
 echo "==> [1/9] Building Go host bin/lmoci (CGO_ENABLED=0 -trimpath)"
@@ -44,8 +44,8 @@ VER=$("$BIN" --version)
 [[ "$VER" == "lmoci 0.1.0" ]] || { echo "unexpected --version: $VER" >&2; exit 1; }
 "$BIN" --help | grep -q "lmoci 0.1.0"
 "$BIN" --notices | grep -q "github.com/oracle/oci-go-sdk/v65"
-grep -q "77932bf7134af4c330fa1eee16c7e10c1fb1a1d7" sdk.lock
-grep -q "77932bf7134a" go.mod
+grep -q "06cd9ae991d90fea9ad38f3b071da646c76832f4" sdk.lock
+grep -q "06cd9ae991d9" go.mod
 ./scripts/sync-lmcloud-schema.sh --verify
 # The bytes the host serves come from hostkit's schema package; they must match the lmcloud.lock pin.
 want_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' lmcloud.lock)"

@@ -52,7 +52,7 @@ The Go host now keeps only OCI-specific code: `internal/oci` (adapter, signing, 
 credentials, OCI REST, error classification) and `cmd/lmoci` (CLI surface + memory watchdog).
 Validation, codec, retry, endpoint policy, pagination, error model/abort format, invoke loop,
 registrations and dry handling come from `github.com/lmctl-ai/lmcloud/hostkit` (branch
-`shared-go`, local `replace => ../lmcloud`). The old `internal/host`, `internal/invoke` and
+`shared-go`, published `github.com/lmctl-ai/lmcloud v0.1.0`). The old `internal/host`, `internal/invoke` and
 `internal/safety` packages and the bespoke `--dry`, `--manifest`, `--endpoint`, `--region`,
 `--sweep` flags are gone; the resolutions recorded above for `internal/host/*` are superseded.
 
@@ -123,7 +123,7 @@ the narrow receipt quirk, missing message id, simulator credentials/scope and en
   retry-safe (a retry after a lost reply gets 409 and is proven by token); the queue POST is never retried
   (OCI allows duplicate displayNames) — after an ambiguous reply the adapter re-looks-up the name and reports
   CONFLICT so hostkit resolves ownership by token. Creation timers are not used.
-- **Dry enums:** go.mod replaces lmcode-go with `../lmcode-go-patched` (temporary; remove when `Registry.Enum`
+- **Dry enums:** go.mod replaces lmcode-go with `published lmcode-go 06cd9ae991d9` (temporary; remove when `Registry.Enum`
   is upstream and pins are bumped). `scripts/test-dry-spy.py` asserts a dry run evaluates
   `last_error().code() == ErrorCode.OK` with zero mutating requests.
 - **Tests:** httpguard-based 503×3, oversize (http=200 kept), cross-origin redirect (no signature reaches the
