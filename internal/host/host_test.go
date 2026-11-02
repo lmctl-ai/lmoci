@@ -1,6 +1,9 @@
 package host
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	lmcode "github.com/lmctl-ai/lmcode-go"
@@ -130,3 +133,55 @@ func TestFakeStorageAndQueueLifecycle(t *testing.T) {
 		t.Fatalf("duplicate QueueAck = %v", err)
 	}
 }
+
+func TestObjectStorageWireAndH1AuthMapping(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Signature ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":"NotAuthenticated","message":"missing signature"}`))
+			return
+		}
+		if r.URL.Path == "/n/" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`"floci-local"`))
+			return
+		}
+		// H1 live-OCI simulation: 404 with NotAuthorizedOrNotFound must map to PERMISSION_DENIED, never exists==false
+		if strings.HasSuffix(r.URL.Path, "/b/restricted-bucket") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"NotAuthorizedOrNotFound","message":"no inspect permission"}`))
+			return
+		}
+		if strings.Contains(r.URL.RawPath, "/o/dir/a%2Bb%2520c.txt") && r.Method == http.MethodPut {
+			if r.Header.Get("opc-meta-custom_tag") != "val1" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("ETag", `"etag-quoted-123"`)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"BucketNotFound","message":"not found"}`))
+	}))
+	defer srv.Close()
+
+	h := New(Options{DefaultEndpoint: srv.URL})
+	h.SetAbortOnError(false)
+
+	exists, err := h.BucketExists("restricted-bucket")
+	if err != nil || exists {
+		t.Fatalf("expected BucketExists false without abort, got exists=%v, err=%v", exists, err)
+	}
+	if h.LastError().Code != CodePermissionDenied {
+		t.Fatalf("H1 violation: expected PERMISSION_DENIED on 404+NotAuthorizedOrNotFound, got %+v", h.LastError())
+	}
+
+	meta, err := h.ObjectPut("allowed-bucket", "dir/a+b%20c.txt", "payload", "text/plain", map[string]string{"custom_tag": "val1"})
+	if err != nil || !meta.Exists || meta.ETag != "etag-quoted-123" {
+		t.Fatalf("ObjectPut wire test failed: meta=%+v, err=%v, lastErr=%+v", meta, err, h.LastError())
+	}
+}
+
