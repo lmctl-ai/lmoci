@@ -43,7 +43,7 @@ func (h *Host) resolveNamespaceLocked(baseEndpoint string) (string, *CloudError)
 	// If talking to a loopback simulator where GetNamespace might be restricted by a bucket-scoped policy,
 	// fall back to DefaultNamespace ("floci-local") so the actual bucket/object request is evaluated by the simulator.
 	if u, err := url.Parse(baseEndpoint); err == nil && isLoopbackHost(u.Hostname()) {
-		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		if status == http.StatusForbidden {
 			return DefaultNamespace, nil
 		}
 	}

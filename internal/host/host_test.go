@@ -185,3 +185,51 @@ func TestObjectStorageWireAndH1AuthMapping(t *testing.T) {
 	}
 }
 
+func TestQueueWireAndReceiptHandling(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/20210201/queues":
+			_, _ = w.Write([]byte(`{"items":[{"id":"ocid1.queue.oc1..q1","displayName":"wire-queue","lifecycleState":"ACTIVE"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/20210201/queues/ocid1.queue.oc1..q1/messages":
+			_, _ = w.Write([]byte(`{"messages":[{"id":42}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/20210201/queues/ocid1.queue.oc1..q1/messages":
+			_, _ = w.Write([]byte(`{"messages":[{"id":42,"content":"__lmcloud_empty__","receipt":"rcpt-42"}]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/20210201/queues/ocid1.queue.oc1..q1/messages/rcpt-42":
+			_, _ = w.Write([]byte(`{"id":42}`))
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/messages/bad-rcpt"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"NotAuthorizedOrNotFound","message":"No in-flight message for receipt: bad-rcpt"}`))
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/messages/"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"NotAuthorizedOrNotFound","message":"No in-flight message for receipt: rcpt-42"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	h := New(Options{DefaultEndpoint: srv.URL})
+	msgID, err := h.QueueSend("wire-queue", "")
+	if err != nil || msgID != "42" {
+		t.Fatalf("QueueSend wire = %q, %v", msgID, err)
+	}
+	batch, err := h.QueueReceive("wire-queue", 1, 0, 30)
+	if err != nil || len(batch.Items) != 1 || batch.Items[0].Body != "" || batch.Items[0].Receipt != "rcpt-42" {
+		t.Fatalf("QueueReceive wire = %+v, %v", batch, err)
+	}
+	r2, err := h.QueueNack("wire-queue", "rcpt-42", 10)
+	if err != nil || r2 != "rcpt-42" {
+		t.Fatalf("QueueNack wire = %q, %v", r2, err)
+	}
+	if err := h.QueueAck("wire-queue", r2); err != nil {
+		t.Fatalf("QueueAck idempotent on 404 wire = %v", err)
+	}
+	h.SetAbortOnError(false)
+	_, _ = h.QueueNack("wire-queue", "bad-rcpt", 10)
+	if h.LastError().Code != CodeInvalidArgument {
+		t.Fatalf("expected INVALID_ARGUMENT for bad receipt on QueueNack, got %+v", h.LastError())
+	}
+}
+
+

@@ -521,12 +521,13 @@ func (h *Host) QueueAck(queueName, receipt string) error {
 		h.finishOKLocked()
 		return nil
 	}
-	mapped := mapOCIHTTPError(status, respBytes, false, "MessageNotFound")
-	// Duplicate queue_ack on an existing queue is idempotent (Scenario 09).
-	if mapped.Code == CodeNotFound || mapped.Code == CodeInvalidArgument {
+	// Duplicate queue_ack on an existing queue is idempotent (Scenario 09):
+	// ocisim returns 404 {"code":"NotAuthorizedOrNotFound","message":"No in-flight message for receipt: ..."}.
+	if status == http.StatusNotFound || status == http.StatusBadRequest {
 		h.finishOKLocked()
 		return nil
 	}
+	mapped := mapOCIHTTPError(status, respBytes, false, "MessageNotFound")
 	return h.finishErrorLocked("queue_ack", queueName, mapped)
 }
 
@@ -594,10 +595,12 @@ func (h *Host) QueueNack(queueName, receipt string, visibilityTimeoutSeconds int
 		h.finishOKLocked()
 		return receipt, nil
 	}
-	mapped := mapOCIHTTPError(status, respBytes, false, "InvalidReceipt")
-	// On an existing queue, a 404/400 on UpdateMessage means the receipt handle is invalid or expired.
-	if mapped.Code == CodeNotFound {
-		mapped = newCloudError(CodeInvalidArgument, status, "InvalidReceipt", "invalid or expired receipt handle")
+	// On an existing queue, a 404/400 on UpdateMessage means the receipt handle is invalid or expired
+	// (ocisim returns 404 {"code":"NotAuthorizedOrNotFound","message":"No in-flight message for receipt: ..."}).
+	if status == http.StatusNotFound || status == http.StatusBadRequest {
+		return "", h.finishErrorLocked("queue_nack", queueName,
+			newCloudError(CodeInvalidArgument, status, "InvalidReceipt", "invalid or expired receipt handle"))
 	}
+	mapped := mapOCIHTTPError(status, respBytes, false, "InvalidReceipt")
 	return "", h.finishErrorLocked("queue_nack", queueName, mapped)
 }
