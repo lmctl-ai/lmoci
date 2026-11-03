@@ -130,6 +130,7 @@ jobs:
           for required in lmoci-linux-x64 lmoci-linux-arm64 lmoci-macos-x64 lmoci-macos-arm64 lmoci-windows-x64.exe; do
             test -f "dist/$required" || { echo "missing tested artifact: $required"; exit 1; }
           done
+          chmod +x dist/lmoci-linux-x64 dist/lmoci-linux-arm64 dist/lmoci-macos-x64 dist/lmoci-macos-arm64
           got="$(dist/lmoci-linux-x64 --version)"
           test "$got" = "lmoci $REL_VERSION" || { echo "binary says '$got', expected lmoci $REL_VERSION"; exit 1; }
           (cd dist && sha256sum lmoci-* > SHA256SUMS)
