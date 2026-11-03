@@ -42,9 +42,9 @@ func TestCLISurface(t *testing.T) {
 		code int
 		want string
 	}{
-		{[]string{"--version"}, 0, "lmoci 0.1.0"},
-		{[]string{"cloud", "-V"}, 0, "lmoci 0.1.0"},
-		{[]string{"--help"}, 0, "lmoci 0.1.0"},
+		{[]string{"--version"}, 0, "lmoci 0.2.0"},
+		{[]string{"cloud", "-V"}, 0, "lmoci 0.2.0"},
+		{[]string{"--help"}, 0, "lmoci 0.2.0"},
 		{[]string{"--notices"}, 0, "github.com/oracle/oci-go-sdk/v65"},
 		{[]string{"--lmcode-signatures", "--without-std"}, 0, "method Cloud.queue_nack(string, string, int) -> string"},
 		{[]string{"--unknown-flag"}, 2, "LMCODE_RETURN_BEGIN"},

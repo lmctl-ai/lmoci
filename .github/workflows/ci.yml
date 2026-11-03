@@ -51,7 +51,9 @@ jobs:
         with:
           node-version: 24
       - name: Pinned script compiler
-        run: npm install -g @lmctl-ai/lmctl@0.2.444
+        run: |
+          npm install --prefix "$RUNNER_TEMP/lmctl" "@lmctl-ai/lmctl@0.2.458"
+          echo "$RUNNER_TEMP/lmctl/node_modules/.bin" >> "$GITHUB_PATH"
       - name: JVM, fake endpoints and examples
         timeout-minutes: 25
         run: bash test.sh

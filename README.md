@@ -1,29 +1,32 @@
 # lmoci
 Script Oracle Cloud from lmscript: typed OCI SDK host, one native executable.
 
-Powered by the official Oracle Cloud Infrastructure (OCI) SDK for Java v3 (`com.oracle.oci.sdk:oci-java-sdk-*` v3.92.1) and `lmcode-java` (`v0.1.1`), `lmoci` gives `lmscript` programs and CLI callers a typed, sandboxed OCI host with offline demo fixtures, local emulator support (`ocisim`), and guarded live execution.
+Powered by the official Oracle Cloud Infrastructure (OCI) SDK for Java v3 (`com.oracle.oci.sdk:oci-java-sdk-*` v3.92.1) and the lmcode Java SDK (pinned by reviewed full commit SHA in `sdk.lock`), `lmoci` gives `lmscript` programs and CLI callers a typed, sandboxed OCI host with offline demo fixtures, local emulator support (`ocisim`), and guarded live execution.
 
 ## Quickstart
 
 Run any example offline with synthetic OCI fixtures (no Oracle Cloud tenancy or credentials required):
 
 ```bash
-lmoci examples/inventory.lms
-lmoci examples/object_storage.lms
-lmoci examples/queue_pipeline.lms
-lmoci examples/streaming_cursor.lms
-lmoci examples/vault_kms.lms
-lmoci examples/policy_audit.lms
-lmoci examples/sandbox_lifecycle.lms
+lmscript examples/inventory.lms
+lmscript examples/object_storage.lms
+lmscript examples/queue_pipeline.lms
+lmscript examples/streaming_cursor.lms
+lmscript examples/vault_kms.lms
+lmscript examples/policy_audit.lms
+lmscript examples/sandbox_lifecycle.lms
 ```
 
-Inspect the typed DSL schema and signatures:
+Inspect the lmcode host schema and signatures:
 
 ```bash
 lmoci --lmcode-schema --json
 lmoci --lmcode-signatures
 lmoci --self-test
 ```
+
+
+Examples call lmoci through `run_lmcode`, using manifest v1 and the terminal result frame. By default the helper resolves `lmoci` on `PATH`. To run a local JVM build, set `LMOCI_HOST=java`, `LMOCI_HOST_ARG1=-jar`, and `LMOCI_HOST_ARG2=target/lmoci-0.2.0-all.jar`.
 
 ## Direct CLI Subcommands
 
@@ -66,7 +69,7 @@ Point `lmoci` at a local [`ocisim`](https://github.com/lmctl-ai/ocisim) instance
 ```bash
 export OCI_ENDPOINT=http://127.0.0.1:4599
 lmoci os namespace --live --endpoint http://127.0.0.1:4599
-lmoci examples/object_storage.lms
+lmscript examples/object_storage.lms
 ```
 
 When targeting a loopback emulator endpoint (`127.0.0.1` or `localhost`) without an `~/.oci/config` file, `lmoci` automatically synthesizes an ephemeral RSA-2048 signing keypair so the official OCI Java SDK request-signing pipeline runs end-to-end against `ocisim`.

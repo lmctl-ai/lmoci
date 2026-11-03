@@ -39,13 +39,19 @@ if [[ "$(uname -s)" == "Linux" ]]; then
   fi
 fi
 
-echo "==> [3/9] Checking --version, --help, --notices, sdk.lock, and lmcloud.lock"
+echo "==> [3/9] Checking --version, --help, --notices, Go SDK pin, and lmcloud.lock"
 VER=$("$BIN" --version)
-[[ "$VER" == "lmoci 0.1.0" ]] || { echo "unexpected --version: $VER" >&2; exit 1; }
-"$BIN" --help | grep -q "lmoci 0.1.0"
+[[ "$VER" == "lmoci 0.2.0" ]] || { echo "unexpected --version: $VER" >&2; exit 1; }
+"$BIN" --help | grep -q "lmoci 0.2.0"
 "$BIN" --notices | grep -q "github.com/oracle/oci-go-sdk/v65"
-grep -q "06cd9ae991d90fea9ad38f3b071da646c76832f4" sdk.lock
 grep -q "06cd9ae991d9" go.mod
+python3 - <<'PY'
+import json, re
+with open("sdk.lock", encoding="utf-8") as f:
+    lock = json.load(f)
+assert lock["repo"] == "lmctl-ai/lmcode-java"
+assert re.fullmatch(r"[0-9a-f]{40}", lock["commit"])
+PY
 ./scripts/sync-lmcloud-schema.sh --verify
 # The bytes the host serves come from hostkit's schema package; they must match the lmcloud.lock pin.
 want_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sha256"])' lmcloud.lock)"

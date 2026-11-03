@@ -1,4 +1,4 @@
-lmoci 0.1.0 — third-party and toolchain notices
+lmoci 0.2.0 — third-party and toolchain notices
 
 lmoci and the lmcode-java SDK are distributed under the MIT License in LICENSE.
 
@@ -27,4 +27,4 @@ Corresponding upstream sources:
 * GraalVM source: https://github.com/oracle/graal/tree/jdk-25.0.2
 * OCI Java SDK source: https://github.com/oracle/oci-java-sdk/tree/v3.92.1
 * SQLite-JDBC source: https://github.com/xerial/sqlite-jdbc/tree/3.50.3.0
-* lmcode-java source: https://github.com/lmctl-ai/lmcode-java/tree/v0.1.1
+* lmcode-java source: https://github.com/lmctl-ai/lmcode-java/tree/d698160c7c7f56c8b364811076928048d5316b76

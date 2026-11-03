@@ -6,7 +6,7 @@
 
   <groupId>ai.lmctl</groupId>
   <artifactId>lmoci</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <name>lmoci</name>
   <description>Script Oracle Cloud from lmscript: typed OCI SDK host, one native executable.</description>
 

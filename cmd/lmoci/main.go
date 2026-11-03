@@ -19,7 +19,7 @@ import (
 	"github.com/lmctl-ai/lmoci/internal/oci"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout)) }
 
