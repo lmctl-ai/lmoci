@@ -1,1 +1,6 @@
-lmctl-ai/lmcode-go 06cd9ae991d90fea9ad38f3b071da646c76832f4
+{
+  "repo": "lmctl-ai/lmcode-java",
+  "tag": "main",
+  "commit": "d698160c7c7f56c8b364811076928048d5316b76",
+  "sha256": "3d0cf172019ab72bc6bbf058b1fc937bee05455aa1f0d35be11a0502d1a0f347"
+}
