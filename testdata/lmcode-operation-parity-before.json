@@ -1,0 +1,93 @@
+{
+  "legacy_main_commit": "cbfc1b37ebf3cb9033861e04545dc587ac8e262d",
+  "legacy_host_version": "lmoci 0.1.0",
+  "cases": [
+    {
+      "name": "namespace",
+      "input_argv": [
+        "os",
+        "namespace",
+        "--demo"
+      ],
+      "new_lmcode_program": "let cloud = oci.demo(); lmcode_return_put(\"namespace\", cloud.namespace());",
+      "legacy_result": {
+        "namespace": "floci-local"
+      }
+    },
+    {
+      "name": "list-buckets",
+      "input_argv": [
+        "os",
+        "list-buckets",
+        "--demo"
+      ],
+      "new_lmcode_program": "let cloud = oci.demo(); lmcode_return_set(json_parse(cloud.buckets().json()));",
+      "legacy_result": [
+        {
+          "name": "demo-artifacts-us-ashburn-1",
+          "namespace": "floci-local",
+          "compartment_id": "ocid1.tenancy.oc1..flocilocaltenancy0000000000000000000000000000000000000000",
+          "region": "us-ashburn-1"
+        }
+      ]
+    },
+    {
+      "name": "create-bucket",
+      "input_argv": [
+        "os",
+        "create-bucket",
+        "--bucket",
+        "lmoci-wp216-parity",
+        "--demo"
+      ],
+      "new_lmcode_program": "let cloud = oci.demo(); lmcode_return_set(json_parse(cloud.bucket_create(\"lmoci-wp216-parity\").json()));",
+      "legacy_result": {
+        "bucket": "lmoci-wp216-parity",
+        "namespace": "floci-local",
+        "compartment_id": "ocid1.tenancy.oc1..flocilocaltenancy0000000000000000000000000000000000000000",
+        "region": "us-ashburn-1",
+        "created": true
+      }
+    },
+    {
+      "name": "policy-analysis",
+      "input_argv": [
+        "iam",
+        "analyze-policy",
+        "--policy",
+        "Allow group DemoGroup to manage objects in compartment Demo"
+      ],
+      "new_lmcode_program": "lmcode_return_set(json_parse(oci.demo().analyze_policy(\"Allow group DemoGroup to manage objects in compartment Demo\").json()));",
+      "legacy_result": {
+        "statement_count": 1,
+        "allow_count": 1,
+        "manage_all_count": 0,
+        "tenancy_wide_count": 0,
+        "any_user_count": 0,
+        "risk_level": "LOW",
+        "finding_count": 0,
+        "findings": []
+      }
+    },
+    {
+      "name": "vault-list",
+      "input_argv": [
+        "vault",
+        "list-vaults",
+        "--demo"
+      ],
+      "new_lmcode_program": "lmcode_return_set(json_parse(oci.demo().vaults().json()));",
+      "legacy_result": [
+        {
+          "id": "ocid1.vault.oc1.us-ashburn-1.demovault",
+          "display_name": "demo-kms-vault",
+          "compartment_id": "ocid1.tenancy.oc1..flocilocaltenancy0000000000000000000000000000000000000000",
+          "vault_type": "DEFAULT",
+          "lifecycle_state": "ACTIVE",
+          "crypto_endpoint": "http://127.0.0.1:4599",
+          "management_endpoint": "http://127.0.0.1:4599"
+        }
+      ]
+    }
+  ]
+}

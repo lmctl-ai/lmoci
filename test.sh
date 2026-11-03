@@ -32,6 +32,7 @@ else
 fi
 python3 scripts/check-lmcode-host.py
 python3 scripts/test-host-protocol.py "$HOST" "$(command -v lmscript)"
+python3 scripts/test-operation-parity.py "$HOST" "$(command -v lmscript)"
 python3 scripts/test-cli.py "$HOST"
 python3 scripts/test-cred.py "$HOST"
 python3 scripts/test-fake.py "$HOST"
