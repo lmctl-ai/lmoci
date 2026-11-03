@@ -31,6 +31,17 @@ if 'if ("--dry-run".equals(arg))' not in main:
 cloud_host = (ROOT / "src/main/java/ai/lmctl/lmoci/CloudHost.java").read_text(encoding="utf-8")
 if "lmoci.dryRun" in main + cloud_host:
     failures.append("host setup still consults the legacy system-property dry override")
+if '"--first".equals(option)' in main or '"--last".equals(option)' in main:
+    failures.append("Main.java still accepts retired --first/--last builder selectors")
+if "inputLimit" in main or "64L * 1024L * 1024L" in main:
+    failures.append("Main.java still imposes a bytecode input size ceiling")
+if "RuntimeBudget" in main + cloud_host:
+    failures.append("Java host still imposes the undocumented runtime memory watchdog")
+if "memoryLimitBytes = Long.MAX_VALUE" not in cloud_host or "instructionLimit = Long.MAX_VALUE" not in cloud_host:
+    failures.append("Java host does not leave VM memory/instruction use caller-unbounded")
+http = (ROOT / "src/main/java/ai/lmctl/lmoci/JdkHttpProvider.java").read_text(encoding="utf-8")
+if ".connectTimeout(" in http or ".timeout(" in http:
+    failures.append("OCI HTTP provider still imposes implicit connect/read deadlines")
 if "test-host-protocol.py" not in (ROOT / "test.sh").read_text(encoding="utf-8"):
     failures.append("test.sh does not run the new protocol controls")
 

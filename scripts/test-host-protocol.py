@@ -41,7 +41,8 @@ assert proc.returncode == 0, proc.stderr
 assert signatures == proc.stdout, "registry signatures differ from the published schema"
 
 # Retired spellings fail with a CLI frame before they can dispatch a program.
-for args in (["--schema"], ["--cli-schema"], ["--dry-run", "--lmcode", "unused.dslb"]):
+for args in (["--schema"], ["--cli-schema"], ["--dry-run", "--lmcode", "unused.dslb"],
+             ["--first", "unused.dslb"], ["--last", "unused.dslb"]):
     result = host_run(list(args), 2)
     lines = result.stdout.splitlines()
     assert len(lines) == 3 and lines[0] == "LMCODE_RETURN_BEGIN" and lines[2] == "LMCODE_RETURN_END", (args, result.stdout)

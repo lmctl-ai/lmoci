@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI, schema parity, failure codes, examples, and managed memory enforcement."""
+"""CLI, schema parity, failure codes, examples, and uncapped host execution."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.2.0-all.jar")
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / f"lmoci-{VERSION}-all.jar")
 BASE_ENV = dict(os.environ)
 for k in (
     "LMOCI_ENDPOINT",
     "OCI_ENDPOINT",
-    "LMOCI_MAX_MEMORY_MB",
     "LMOCI_MAX_COST_USD",
     "CI",
     "GITHUB_ACTIONS",
@@ -74,9 +74,9 @@ def run(args: list[str], code: int = 0, extra: dict[str, str] | None = None) -> 
 
 
 def main() -> None:
-    assert run(["--version"]).stdout == "lmoci 0.2.0\n"
+    assert run(["--version"]).stdout == f"lmoci {VERSION}\n"
     assert run(["--notices"]).stdout == (ROOT / "THIRD_PARTY_NOTICES").read_text(encoding="utf-8")
-    assert "LMOCI_MAX_MEMORY_MB" in run(["--help"]).stdout
+    assert "LMOCI_MAX_MEMORY_MB" not in run(["--help"]).stdout
     assert "\u2014 Oracle Cloud" in run(
         ["--help"],
         extra={"JAVA_TOOL_OPTIONS": "-Dstdout.encoding=windows-1252 -Dstderr.encoding=windows-1252"},
@@ -117,10 +117,6 @@ def main() -> None:
     run(["--nonesuch"], 2)
     run(["--lmcode", "missing-bytecode.dslb"], 3)
 
-    for raw in ["0", "-1", "wat", "1.5", "99999999999999999999999999"]:
-        err = run(["--version"], 2, {"LMOCI_MAX_MEMORY_MB": raw}).stderr
-        assert "positive whole MiB" in err, err
-
     for raw in ["-0.01", "100.01", "nan", "1e100"]:
         err = run(["--version"], 2, {"LMOCI_MAX_COST_USD": raw}).stderr
         assert "LMOCI_MAX_COST_USD" in err, err
@@ -140,12 +136,12 @@ def main() -> None:
         bad.write_bytes(b"not bytecode")
         run(["--lmcode", str(bad)], 3)
 
-        # Memory budget enforcement through the version-1 run_lmcode manifest.
-        budget_lms = d / "budget.lms"
+        # A low legacy budget variable must not impose an undocumented host cap.
+        budget_lms = d / "unbounded-memory.lms"
         command_literal = json.dumps(host_cmd() + ["--lmcode", "$DSLFILE"])
         budget_lms.write_text(
             f'p = _lmcode_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};\n'
-            'let i = 0; while (i < 10000) { let data = str_repeat("x", 1000000); i = i + 1; }\n'
+            'let data = str_repeat("x", 70000000); lmcode_return_put("size", str_len(data));\n'
             'end _lmcode_\n'
             f'r = run_lmcode(p, {{command: {command_literal}}});\n'
             'write_file("budget-result.json", json_stringify(r));\n',
@@ -157,7 +153,23 @@ def main() -> None:
                               text=True, capture_output=True, check=False)
         assert comp.returncode == 0, (comp.stdout, comp.stderr)
         budget = json.loads((d / "budget-result.json").read_text(encoding="utf-8"))
-        assert budget.get("ok") is False and "memory budget" in budget.get("message", ""), budget
+        assert budget.get("ok") is True and budget.get("result", {}).get("size") == 70000000, budget
+
+        if os.environ.get("LMOCI_NATIVE") != "1":
+            unbounded_loop = d / "unbounded-instructions.lms"
+            unbounded_loop.write_text(
+                f'p = _lmcode_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};\n'
+                'let i = 0; while (i < 10000001) { i = i + 1; }\n'
+                'lmcode_return_put("iterations", i);\nend _lmcode_\n'
+                f'r = run_lmcode(p, {{command: {command_literal}}});\n'
+                'write_file("instruction-result.json", json_stringify(r));\n',
+                encoding="utf-8",
+            )
+            loop_comp = subprocess.run(lmscript_cmd + [str(unbounded_loop)], cwd=d, env=BASE_ENV,
+                                       text=True, capture_output=True, check=False)
+            assert loop_comp.returncode == 0, (loop_comp.stdout, loop_comp.stderr)
+            loop = json.loads((d / "instruction-result.json").read_text(encoding="utf-8"))
+            assert loop.get("ok") is True and loop.get("result", {}).get("iterations") == 10000001, loop
 
         # The strict host protocol and callback dry controls run in test-host-protocol.py.
         # Compile and execute every example in an isolated working copy through run_lmcode.
@@ -172,7 +184,7 @@ def main() -> None:
                                   text=True, capture_output=True, check=False)
             assert comp.returncode == 0, (example.name, comp.stderr, comp.stdout)
 
-    print("PASS test-cli.py: schema/signature parity, memory budget, direct CLI and lmcode examples")
+    print("PASS test-cli.py: schema/signature parity, uncapped VM execution, direct CLI and lmcode examples")
 
 
 if __name__ == "__main__":

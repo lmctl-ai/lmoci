@@ -22,7 +22,6 @@ import com.oracle.bmc.http.client.HttpResponse;
 import com.oracle.bmc.http.client.Method;
 import com.oracle.bmc.http.client.RequestInterceptor;
 import com.oracle.bmc.http.client.Serializer;
-import com.oracle.bmc.http.client.StandardClientProperties;
 import com.oracle.bmc.http.client.StandardHttpProviderCapability;
 import com.oracle.bmc.http.client.internal.DelegationTokenClientFilterProvider;
 import com.oracle.bmc.http.client.internal.ExplicitlySetBmcModel;
@@ -36,7 +35,6 @@ import java.lang.reflect.Field;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.FieldPosition;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -212,10 +210,7 @@ public final class JdkHttpProvider implements HttpProvider, DelegationTokenClien
 
     static final class JdkHttpClientBuilder implements HttpClientBuilder {
         private String baseUri = "http://127.0.0.1:4599";
-        private Duration connectTimeout = Duration.ofSeconds(10);
-        private Duration readTimeout = Duration.ofSeconds(60);
         private final List<PrioritizedInterceptor> interceptors = new ArrayList<>();
-        private final Map<ClientProperty<?>, Object> properties = new HashMap<>();
 
         @Override
         public HttpClientBuilder baseUri(URI uri) {
@@ -231,12 +226,7 @@ public final class JdkHttpProvider implements HttpProvider, DelegationTokenClien
 
         @Override
         public <T> HttpClientBuilder property(ClientProperty<T> key, T value) {
-            properties.put(key, value);
-            if (key == StandardClientProperties.CONNECT_TIMEOUT && value instanceof Duration d) {
-                this.connectTimeout = d;
-            } else if (key == StandardClientProperties.READ_TIMEOUT && value instanceof Duration d) {
-                this.readTimeout = d;
-            }
+            // OCI's client configuration supplies default connect/read durations; do not turn them into host deadlines.
             return this;
         }
 
@@ -252,29 +242,25 @@ public final class JdkHttpProvider implements HttpProvider, DelegationTokenClien
                     .sorted(Comparator.comparingInt(PrioritizedInterceptor::priority))
                     .map(PrioritizedInterceptor::interceptor)
                     .toList();
-            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+            java.net.http.HttpClient.Builder builder = java.net.http.HttpClient.newBuilder()
                     .version(java.net.http.HttpClient.Version.HTTP_1_1)
-                    .connectTimeout(connectTimeout)
-                    .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
-                    .build();
-            return new JdkHttpClient(client, baseUri, readTimeout, sorted);
+                    .followRedirects(java.net.http.HttpClient.Redirect.NEVER);
+            java.net.http.HttpClient client = builder.build();
+            return new JdkHttpClient(client, baseUri, sorted);
         }
     }
 
     static final class JdkHttpClient implements HttpClient {
         final java.net.http.HttpClient client;
         final String baseUriString;
-        final Duration readTimeout;
         final List<RequestInterceptor> requestInterceptors;
 
         JdkHttpClient(
                 java.net.http.HttpClient client,
                 String baseUriString,
-                Duration readTimeout,
                 List<RequestInterceptor> requestInterceptors) {
             this.client = client;
             this.baseUriString = baseUriString;
-            this.readTimeout = readTimeout;
             this.requestInterceptors = requestInterceptors;
         }
 
@@ -502,8 +488,7 @@ public final class JdkHttpProvider implements HttpProvider, DelegationTokenClien
                 }
                 URI targetUri = uri();
                 java.net.http.HttpRequest.Builder builder = java.net.http.HttpRequest.newBuilder(targetUri)
-                        .version(java.net.http.HttpClient.Version.HTTP_1_1)
-                        .timeout(client.readTimeout);
+                        .version(java.net.http.HttpClient.Version.HTTP_1_1);
 
                 for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
                     String name = entry.getKey();

@@ -57,9 +57,8 @@ public final class CliArea {
 
     private static OciBackend createBackend(Parsed parsed) {
         Map<String, String> env = System.getenv();
-        RuntimeBudget budget = RuntimeBudget.fromEnv(env);
         CostLedger cost = CostLedger.fromEnv(env);
-        OciBackend backend = new OciBackend(env, cost, budget);
+        OciBackend backend = new OciBackend(env, cost);
         String profile = parsed.opt("profile", System.getProperty("lmoci.profile", ""));
         if (profile != null && !profile.isBlank()) {
             backend.setProfile(profile);

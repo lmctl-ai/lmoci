@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,11 +29,11 @@ public final class Main {
     }
 
     public static final String VERSION = "0.2.0";
-    private static final String USAGE = "usage: lmoci --lmcode FILE [--lmcode FILE | --first FILE | --last FILE] ...\n"
+    private static final String USAGE = "usage: lmoci --lmcode FILE [--lmcode FILE ...]\n"
             + "       lmoci --lmcode-schema [--json] | --lmcode-signatures [--without-std]\n";
     private static final String HELP = """
             lmoci 0.2.0 — Oracle Cloud Infrastructure lmcode host
-            usage: lmoci --lmcode FILE [--lmcode FILE | --first FILE | --last FILE] ...
+            usage: lmoci --lmcode FILE [--lmcode FILE ...]
                    lmoci --lmcode-schema [--json] | --lmcode-signatures [--without-std]
                    lmoci cred <set|get|list|delete|path> [options]
                    lmoci <os|iam|queue|stream|vault|inventory> <action> [options]
@@ -53,13 +52,10 @@ public final class Main {
               Shared SQLite credential store at ~/.lmconn/creds.db (override via LMOCI_DB / LMCLIENT_DB / LMCONN_DB).
               Secret values and private keys are never printed unless `lmoci cred get ... --reveal` is explicitly passed.
 
-            Budgets & Safety:
-              LMOCI_MAX_MEMORY_MB: whole MiB between 64 and 65536 (default 3072).
+            Safety:
               LMOCI_MAX_COST_USD:  dollar cap between 0.00 and 100.00 (default 2.00).
               Every sandbox run (oci.with_sandbox(name, fn)) tears down owned resources in reverse order on exit or error.
             """;
-
-    private record FileArgument(String path, int priority) {}
 
     private Main() {}
 
@@ -105,7 +101,7 @@ public final class Main {
         try {
             return runChecked(args);
         } catch (OutOfMemoryError error) {
-            return Reports.failureFrame(System.out, "run", VmException.run("LMOCI_MAX_MEMORY_MB memory budget exceeded"));
+            return Reports.failureFrame(System.out, "run", VmException.run("memory exhausted"));
         } catch (VmException error) {
             return Reports.failureFrame(System.out, phase(error), error);
         } catch (Exception error) {
@@ -197,12 +193,11 @@ public final class Main {
             }
         }
 
-        List<FileArgument> files = parseFiles(args);
-        List<String> parsedFiles = files.stream().map(FileArgument::path).toList();
+        List<String> files = parseFiles(args);
         final InvocationResults results;
         try {
             // Strict manifest validation precedes host construction, schema setup, bytecode loading, and callbacks.
-            results = InvocationResults.fromCommand(parsedFiles);
+            results = InvocationResults.fromCommand(files);
         } catch (VmException error) {
             return Reports.failureFrame(System.out, "cli", error);
         }
@@ -220,27 +215,19 @@ public final class Main {
             ResultContract contract = ResultContract.fromSchema(new String(schemaBytes, StandardCharsets.UTF_8));
 
             stage = "load";
-            long budgetBytes = host.runtimeBudget().maxMemoryBytes();
             List<Program> programs = new ArrayList<>(files.size());
             for (int index = 0; index < files.size(); index++) {
-                FileArgument file = files.get(index);
                 InvocationResults.Registration registration = results.registrations().get(index);
                 currentPart = registration.index();
-                Path path = Path.of(file.path());
+                Path path = Path.of(files.get(index));
                 if (!Files.isRegularFile(path)) {
-                    results.fail(registration.index(), "load", VmException.badBytecode("cannot read lmcode file: " + file.path()));
-                    return results.writeFrame(System.out);
-                }
-                long size = Files.size(path);
-                long inputLimit = Math.min(budgetBytes / 4, 64L * 1024L * 1024L);
-                if (size > inputLimit) {
-                    results.fail(registration.index(), "load", VmException.badBytecode("LMOCI_MAX_MEMORY_MB bytecode input exceeds memory budget"));
+                    results.fail(registration.index(), "load", VmException.badBytecode("cannot read lmcode file: " + files.get(index)));
                     return results.writeFrame(System.out);
                 }
                 try {
                     programs.add(Program.load(Files.readAllBytes(path), schemaBytes, registry));
                 } catch (IOException error) {
-                    results.fail(registration.index(), "load", VmException.badBytecode("cannot read lmcode file: " + file.path()));
+                    results.fail(registration.index(), "load", VmException.badBytecode("cannot read lmcode file: " + files.get(index)));
                     return results.writeFrame(System.out);
                 } catch (VmException error) {
                     results.fail(registration.index(), "load", error);
@@ -248,15 +235,10 @@ public final class Main {
                 }
             }
 
-            Context context = host.context(budgetBytes, results.dry());
+            Context context = host.context(results.dry());
             context.setDry(results.dry());
-            List<Integer> order = new ArrayList<>();
-            for (int index = 0; index < files.size(); index++) {
-                order.add(index);
-            }
-            order.sort(Comparator.comparingInt(index -> files.get(index).priority()));
             stage = "run";
-            for (int index : order) {
+            for (int index = 0; index < files.size(); index++) {
                 InvocationResults.Registration registration = results.registrations().get(index);
                 currentPart = registration.index();
                 try {
@@ -287,9 +269,8 @@ public final class Main {
             results.fail(currentPart, stage.equals("load") ? "load" : "run",
                     stage.equals("load") ? VmException.badBytecode(message(error)) : VmException.host(message(error)));
         } catch (OutOfMemoryError error) {
-            results.fail(currentPart, stage.equals("setup") ? "cli" : "run",
-                    stage.equals("setup") ? new VmException("CLI_USAGE", "LMOCI_MAX_MEMORY_MB setup exceeded memory budget")
-                            : VmException.run("LMOCI_MAX_MEMORY_MB memory budget exceeded"));
+            results.fail(currentPart, stage.equals("setup") ? "cli" : stage.equals("load") ? "load" : "run",
+                    VmException.run("memory exhausted"));
         } finally {
             if (host != null) {
                 try {
@@ -302,28 +283,19 @@ public final class Main {
         return results.writeFrame(System.out);
     }
 
-    private static List<FileArgument> parseFiles(String[] args) {
-        List<FileArgument> files = new ArrayList<>();
+    private static List<String> parseFiles(String[] args) {
+        List<String> files = new ArrayList<>();
         for (int index = 0; index < args.length;) {
             String option = args[index++];
-            int priority;
-            if ("--lmcode".equals(option)) {
-                priority = 1;
-            } else if ("--first".equals(option)) {
-                priority = 0;
-            } else if ("--last".equals(option)) {
-                priority = 2;
-            } else {
+            if (!"--lmcode".equals(option)) {
                 throw new VmException("CLI_USAGE", USAGE);
             }
             if (index >= args.length || args[index].isEmpty() || args[index].startsWith("--")) {
                 throw new VmException("CLI_USAGE", USAGE);
             }
-            files.add(new FileArgument(args[index++], priority));
-            if (option.equals("--lmcode")) {
-                while (index < args.length && !args[index].startsWith("--")) {
-                    files.add(new FileArgument(args[index++], priority));
-                }
+            files.add(args[index++]);
+            while (index < args.length && !args[index].startsWith("--")) {
+                files.add(args[index++]);
             }
         }
         if (files.isEmpty()) {
@@ -348,7 +320,7 @@ public final class Main {
             if (!"CRITICAL".equals(analysis.get("risk_level"))) {
                 throw new IllegalStateException("PolicyAnalyzer self-test failed");
             }
-            Context context = host.context(host.runtimeBudget().maxMemoryBytes(), false);
+            Context context = host.context(false);
             if (context.get("oci") == null || registry.signatures().isEmpty()) {
                 throw new IllegalStateException("lmcode host self-test failed");
             }
@@ -376,7 +348,6 @@ public final class Main {
     private static int validateUtilityConfig() {
         Map<String, String> env = System.getenv();
         try {
-            RuntimeBudget.fromEnv(env);
             CostLedger.fromEnv(env);
             return 0;
         } catch (IllegalArgumentException error) {
@@ -406,7 +377,7 @@ public final class Main {
         try {
             status = run(args);
         } catch (OutOfMemoryError error) {
-            status = Reports.failureFrame(System.out, "run", VmException.run("LMOCI_MAX_MEMORY_MB memory budget exceeded"));
+            status = Reports.failureFrame(System.out, "run", VmException.run("memory exhausted"));
         } catch (Exception error) {
             status = Reports.failureFrame(System.out, "run", VmException.host(message(error)));
         }

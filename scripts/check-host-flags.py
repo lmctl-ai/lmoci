@@ -20,7 +20,8 @@ with tempfile.TemporaryDirectory(prefix='host flag control ') as directory:
     # Collect refusal controls so a baseline proves every retired spelling fails.
     failures = []
     for flag, rest in [(old, [missing]), (old + '-schema', ['--json']),
-                       (old + '-signatures', [])]:
+                       (old + '-signatures', []), ('--first', [missing]),
+                       ('--last', [missing])]:
         result = run([flag, *rest])
         if result.returncode != 2: failures.append((flag, result.returncode, 'retired option accepted or reached execution'))
         if str(missing).encode() in result.stdout + result.stderr: failures.append((flag, 'opened retired-flag input'))

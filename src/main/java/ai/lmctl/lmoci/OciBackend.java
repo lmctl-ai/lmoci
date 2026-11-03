@@ -193,7 +193,6 @@ public final class OciBackend {
 
     private final Map<String, String> env;
     private final CostLedger costLedger;
-    private final RuntimeBudget runtimeBudget;
     private final ConcurrentHashMap<String, String> regionEndpoints = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, Object>> demoResources = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Map<String, byte[]>> demoObjects = new ConcurrentHashMap<>();
@@ -205,10 +204,9 @@ public final class OciBackend {
     private String defaultRegion;
     private String defaultEndpoint;
 
-    public OciBackend(Map<String, String> env, CostLedger costLedger, RuntimeBudget runtimeBudget) {
+    public OciBackend(Map<String, String> env, CostLedger costLedger) {
         this.env = env;
         this.costLedger = costLedger;
-        this.runtimeBudget = runtimeBudget;
         this.profile = firstNonBlank(
                 env.get("LMOCI_PROFILE"),
                 env.get("OCI_CLI_PROFILE"),
@@ -2110,7 +2108,6 @@ public final class OciBackend {
     }
 
     private void record(String service, String operation) {
-        runtimeBudget.check(service + "." + operation);
         costLedger.recordRequest(service, operation);
     }
 

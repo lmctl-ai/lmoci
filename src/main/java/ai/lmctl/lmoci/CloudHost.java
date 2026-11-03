@@ -19,7 +19,6 @@ import java.util.Map;
 /** Typed OCI SDK host registry and sandbox lifecycle manager for lmscript. */
 public final class CloudHost implements AutoCloseable {
     private final Map<String, String> env;
-    private final RuntimeBudget runtimeBudget;
     private final CostLedger costLedger;
     private final List<Sandbox> runs = new ArrayList<>();
     private boolean closed;
@@ -32,12 +31,7 @@ public final class CloudHost implements AutoCloseable {
 
     public CloudHost(Map<String, String> env) {
         this.env = env;
-        this.runtimeBudget = RuntimeBudget.fromEnv(env);
         this.costLedger = CostLedger.fromEnv(env);
-    }
-
-    public RuntimeBudget runtimeBudget() {
-        return runtimeBudget;
     }
 
     public CostLedger costLedger() {
@@ -45,7 +39,7 @@ public final class CloudHost implements AutoCloseable {
     }
 
     private Session openSession(String region, boolean demo, String endpointOverride) {
-        OciBackend backend = new OciBackend(env, costLedger, runtimeBudget);
+        OciBackend backend = new OciBackend(env, costLedger);
         String sysProfile = System.getProperty("lmoci.profile", "");
         if (!sysProfile.isBlank()) {
             backend.setProfile(sysProfile);
@@ -315,13 +309,11 @@ public final class CloudHost implements AutoCloseable {
         return r;
     }
 
-    public Context context(long budgetBytes) {
-        return context(budgetBytes, false);
-    }
-
-    public Context context(long budgetBytes, boolean dry) {
+    public Context context(boolean dry) {
         Context c = new Context();
-        c.memoryLimitBytes = budgetBytes;
+        // The SDK defaults are host-wide ceilings; this host adds no VM resource budget of its own.
+        c.memoryLimitBytes = Long.MAX_VALUE;
+        c.instructionLimit = Long.MAX_VALUE;
         c.setDry(dry);
         c.setObject("oci", "Cloud", dry
                 ? new Session(null, "us-ashburn-1", true)
