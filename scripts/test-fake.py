@@ -19,7 +19,8 @@ import urllib.parse
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.2.0-all.jar")
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / f"lmoci-{VERSION}-all.jar")
 
 
 def host_cmd() -> list[str]:

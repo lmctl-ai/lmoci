@@ -26,7 +26,7 @@ lmoci --self-test
 ```
 
 
-Examples call lmoci through `run_lmcode`, using manifest v1 and the terminal result frame. By default the helper resolves `lmoci` on `PATH`. To run a local JVM build, set `LMOCI_HOST=java`, `LMOCI_HOST_ARG1=-jar`, and `LMOCI_HOST_ARG2=target/lmoci-0.2.0-all.jar`.
+Examples call lmoci through `run_lmcode`, using manifest v1 and the terminal result frame. By default the helper resolves `lmoci` on `PATH`. To run a local JVM build, set `LMOCI_HOST=java`, `LMOCI_HOST_ARG1=-jar`, and `LMOCI_HOST_ARG2` to `target/lmoci-$(cat VERSION)-all.jar`.
 
 ## Direct CLI Subcommands
 

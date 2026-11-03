@@ -1,19 +1,47 @@
 name: ci
+
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
+
 env:
   PYTHONUTF8: '1'
   LMOCI_LIVE: '0'
+
 permissions:
   contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: true
+
 jobs:
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      v: ${{ steps.release-version.outputs.v }}
+      publish: ${{ steps.release-version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test deterministic version stamping
+        run: bash scripts/test-release-version.sh
+      - id: release-version
+        name: Derive version from the workflow run number
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/heads/main ]]; then
+            version="$(bash scripts/stamp-version.sh --base).${GITHUB_RUN_NUMBER}"
+            echo "v=$version" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "v=" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   native:
+    needs: version
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 80
@@ -42,7 +70,7 @@ jobs:
       - name: Linux prerequisites
         if: runner.os == 'Linux'
         run: timeout 180 sudo apt-get update -qq && timeout 180 sudo apt-get install -y -qq build-essential zlib1g-dev
-      - name: macOS timeout
+      - name: Install coreutils on macOS
         if: runner.os == 'macOS'
         run: brew install coreutils && echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756
@@ -54,6 +82,9 @@ jobs:
         run: |
           npm install --prefix "$RUNNER_TEMP/lmctl" "@lmctl-ai/lmctl@0.2.458"
           echo "$RUNNER_TEMP/lmctl/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Stamp release version for this main push
+        if: needs.version.outputs.v != ''
+        run: bash scripts/stamp-version.sh "${{ needs.version.outputs.v }}"
       - name: JVM, fake endpoints and examples
         timeout-minutes: 25
         run: bash test.sh
@@ -78,27 +109,40 @@ jobs:
           name: lmoci-${{ matrix.name }}
           path: dist/*
           if-no-files-found: error
+
   release:
-    # Publish when the four Linux/macOS lanes produced binaries even if the Windows lane failed
-    # (Windows may be a stub early); a missing Windows asset is stated in the release notes.
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
-    needs: native
+    if: needs.version.outputs.publish == 'true'
+    needs: [version, native]
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
+    env:
+      REL_VERSION: ${{ needs.version.outputs.v }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
+          pattern: lmoci-*
           path: dist
           merge-multiple: true
-      - name: Publish five tested binaries
+      - name: Verify platform set, embedded version and checksums
+        run: |
+          for required in lmoci-linux-x64 lmoci-linux-arm64 lmoci-macos-x64 lmoci-macos-arm64 lmoci-windows-x64.exe; do
+            test -f "dist/$required" || { echo "missing tested artifact: $required"; exit 1; }
+          done
+          got="$(dist/lmoci-linux-x64 --version)"
+          test "$got" = "lmoci $REL_VERSION" || { echo "binary says '$got', expected lmoci $REL_VERSION"; exit 1; }
+          (cd dist && sha256sum lmoci-* > SHA256SUMS)
+      - name: Publish or refresh the CI-owned release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd dist
-          for required in lmoci-linux-x64 lmoci-linux-arm64 lmoci-macos-x64 lmoci-macos-arm64; do test -f "$required" || { echo "missing $required"; exit 1; }; done
-          notes='Oracle Cloud Infrastructure (OCI) SDK for Java v3 scripting host. Native executables; no Java installation required. Linux: glibc >= 2.35. Windows: Microsoft VC++ runtime. Offline examples and fake-endpoint CI; live writes require opt-in and a run-owned ledger.'
-          if ! ls lmoci-windows-x64* >/dev/null 2>&1; then notes="$notes This release has no Windows binary: the Windows lane failed; use the previous release on Windows."; fi
-          sha256sum lmoci-* > SHA256SUMS
-          timeout 180 gh release create "$GITHUB_REF_NAME" lmoci-* SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes "$notes"
+          tag="v$REL_VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber dist/*
+          else
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --latest --title "lmoci $REL_VERSION" \
+              --notes "lmoci $REL_VERSION, built and tested on all five native platforms by the repository CI." \
+              dist/*
+          fi

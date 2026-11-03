@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
+VERSION="$(head -n1 VERSION | tr -d '[:space:]')"
 
 chmod +x scripts/*.py scripts/*.sh
 
@@ -19,10 +20,10 @@ if [[ "${LMOCI_NATIVE:-0}" == "1" ]]; then
     python3 scripts/check-linux-linkage.py "$HOST"
   fi
 else
-  if [[ ! -f target/lmoci-0.2.0-all.jar ]]; then
+  if [[ ! -f "target/lmoci-${VERSION}-all.jar" ]]; then
     mvn -q package -DskipTests
   fi
-  HOST="$ROOT/target/lmoci-0.2.0-all.jar"
+  HOST="$ROOT/target/lmoci-${VERSION}-all.jar"
 fi
 
 LMSCRIPT="${LMSCRIPT_BIN:-$(command -v lmscript || true)}"
