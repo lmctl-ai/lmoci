@@ -26,8 +26,11 @@ for token in ("InvocationResults.fromCommand", "ResultContract.fromSchema", "res
         failures.append("Main.java is missing " + token)
 if "Reports.ok(\"null\")" in main:
     failures.append("Main.java still uses the bare success envelope")
-if "lmoci.dryRun" in main or '"--dry-run"' in main:
-    failures.append("the host still accepts or consults the legacy dry flag")
+if 'if ("--dry-run".equals(arg))' not in main:
+    failures.append("Main.java does not refuse the legacy CLI dry flag")
+cloud_host = (ROOT / "src/main/java/ai/lmctl/lmoci/CloudHost.java").read_text(encoding="utf-8")
+if "lmoci.dryRun" in main + cloud_host:
+    failures.append("host setup still consults the legacy system-property dry override")
 if "test-host-protocol.py" not in (ROOT / "test.sh").read_text(encoding="utf-8"):
     failures.append("test.sh does not run the new protocol controls")
 

@@ -24,7 +24,7 @@ public final class CloudHost implements AutoCloseable {
     private final List<Sandbox> runs = new ArrayList<>();
     private boolean closed;
 
-    public final record Session(OciBackend backend, String region) {}
+    public final record Session(OciBackend backend, String region, boolean demoOnly) {}
 
     public CloudHost() {
         this(System.getenv());
@@ -64,13 +64,12 @@ public final class CloudHost implements AutoCloseable {
             backend.setEndpoint(targetRegion, ep);
         }
 
-        boolean dryRun = Boolean.getBoolean("lmoci.dryRun");
-        if (demo || dryRun) {
+        if (demo) {
             backend.setMode("demo");
         } else {
             backend.setMode("live");
         }
-        return new Session(backend, targetRegion);
+        return new Session(backend, targetRegion, demo);
     }
 
     private Session session(Value value) {
@@ -86,24 +85,28 @@ public final class CloudHost implements AutoCloseable {
         r.context("oci", "Cloud");
         r.function("check", List.of("bool"), "void", (c, s, a) -> {
             if (!a[0].asBool()) {
-                throw VmException.host("check failed");
+                throw new VmException("APP_FAIL", "check failed");
             }
             return Value.none();
         });
 
         r.method("Cloud", "demo", List.of(), "Cloud",
-                (c, s, a) -> Value.object("Cloud", openSession("us-ashburn-1", true, "")));
+                (c, s, a) -> Value.object("Cloud", openSession("us-ashburn-1", true, "")),
+                Registry.dry((c, s, a) -> Value.object("Cloud", new Session(null, "us-ashburn-1", true))));
         r.method("Cloud", "region", List.of("string"), "Cloud",
-                (c, s, a) -> Value.object("Cloud", openSession(text(a[0]), false, "")));
+                (c, s, a) -> Value.object("Cloud", openSession(text(a[0]), false, "")),
+                Registry.dry((c, s, a) -> Value.object("Cloud", new Session(null, text(a[0]), false))));
         r.method("Cloud", "endpoint", List.of("string", "string"), "Cloud",
-                (c, s, a) -> Value.object("Cloud", openSession(text(a[0]), false, text(a[1]))));
+                (c, s, a) -> Value.object("Cloud", openSession(text(a[0]), false, text(a[1]))),
+                Registry.dry((c, s, a) -> Value.object("Cloud", new Session(null, text(a[0]), false))));
         r.method("Cloud", "profile", List.of("string"), "Cloud", (c, s, a) -> {
             Session current = session(s);
             current.backend().setProfile(text(a[0]));
             return Value.object("Cloud", current);
-        });
+        }, Registry.dry((c, s, a) -> Value.object("Cloud", s.asObject())));
         r.method("Cloud", "is_demo", List.of(), "bool",
-                (c, s, a) -> Value.ofBool("demo".equals(session(s).backend().mode())));
+                (c, s, a) -> Value.ofBool("demo".equals(session(s).backend().mode())),
+                Registry.dry((c, s, a) -> Value.ofBool(((Session) s.asObject()).demoOnly())));
         r.method("Cloud", "snapshot", List.of(), "Row", (c, s, a) -> {
             Session sess = session(s);
             return rowValue(c, sess.backend().snapshot(sess.region(), Map.of()));
@@ -231,8 +234,7 @@ public final class CloudHost implements AutoCloseable {
                 (c, s, a) -> rowsValue(c, Sandbox.leftovers(Path.of(text(a[0])), a[1].asInt())));
         r.method("Cloud", "run", List.of("string", "string"), "Run", (c, s, a) -> {
             Session sess = session(s);
-            boolean dryRun = Boolean.getBoolean("lmoci.dryRun");
-            Sandbox sandbox = new Sandbox(sess.backend(), sess.region(), text(a[0]), Path.of(text(a[1])), dryRun);
+            Sandbox sandbox = new Sandbox(sess.backend(), sess.region(), text(a[0]), Path.of(text(a[1])), c.dry());
             runs.add(sandbox);
             return Value.object("Run", sandbox);
         });
@@ -314,9 +316,16 @@ public final class CloudHost implements AutoCloseable {
     }
 
     public Context context(long budgetBytes) {
+        return context(budgetBytes, false);
+    }
+
+    public Context context(long budgetBytes, boolean dry) {
         Context c = new Context();
         c.memoryLimitBytes = budgetBytes;
-        c.setObject("oci", "Cloud", openSession("us-ashburn-1", true, ""));
+        c.setDry(dry);
+        c.setObject("oci", "Cloud", dry
+                ? new Session(null, "us-ashburn-1", true)
+                : openSession("us-ashburn-1", true, ""));
         return c;
     }
 

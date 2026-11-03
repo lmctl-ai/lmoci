@@ -72,7 +72,7 @@ public final class CliArea {
         if (endpoint != null && !endpoint.isBlank()) {
             backend.setEndpoint(backend.defaultRegion(), endpoint);
         }
-        boolean demo = "true".equals(parsed.opt("demo", null)) || Boolean.getBoolean("lmoci.dryRun");
+        boolean demo = "true".equals(parsed.opt("demo", null));
         if (demo) {
             backend.setMode("demo");
         } else {

@@ -1,9 +1,11 @@
 package ai.lmctl.lmoci;
 
+import io.lmctl.lmcode.Context;
+import io.lmctl.lmcode.InvocationResults;
 import io.lmctl.lmcode.Program;
 import io.lmctl.lmcode.Registry;
 import io.lmctl.lmcode.Reports;
-import io.lmctl.lmcode.SelfTest;
+import io.lmctl.lmcode.ResultContract;
 import io.lmctl.lmcode.VmException;
 
 import java.io.FileDescriptor;
@@ -16,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,18 +29,22 @@ public final class Main {
         System.setProperty("jdk.httpclient.allowRestrictedHeaders", "date,host,content-length,expect,connection");
     }
 
-    public static final String VERSION = "0.1.0";
-
+    public static final String VERSION = "0.2.0";
+    private static final String USAGE = "usage: lmoci --lmcode FILE [--lmcode FILE | --first FILE | --last FILE] ...\n"
+            + "       lmoci --lmcode-schema [--json] | --lmcode-signatures [--without-std]\n";
     private static final String HELP = """
-            lmoci 0.1.0 — Oracle Cloud Infrastructure SDK for Java scripting host
-            usage: lmoci [--dry-run] [--apply] [--live] [--profile NAME] [--region NAME] [--endpoint URL] --lmcode FILE
+            lmoci 0.2.0 — Oracle Cloud Infrastructure lmcode host
+            usage: lmoci --lmcode FILE [--lmcode FILE | --first FILE | --last FILE] ...
                    lmoci --lmcode-schema [--json] | --lmcode-signatures [--without-std]
                    lmoci cred <set|get|list|delete|path> [options]
                    lmoci <os|iam|queue|stream|vault|inventory> <action> [options]
                    lmoci --version | --notices | --help | --self-test
                    lmoci --sweep LEDGER_DIR --older-than-hours N
 
-            DSL context:
+            Invocation preview mode is carried by the lmscript manifest.
+            Direct OCI areas remain offline with --demo; live calls require explicit endpoint/configuration.
+
+            lmcode context:
               oci.demo()                        Offline deterministic OCI fixture session
               oci.region("us-ashburn-1")        Live OCI session for the specified region
               oci.endpoint("us-ashburn-1", URL) Live OCI session targeting an explicit endpoint (e.g. ocisim http://127.0.0.1:4599)
@@ -49,8 +56,10 @@ public final class Main {
             Budgets & Safety:
               LMOCI_MAX_MEMORY_MB: whole MiB between 64 and 65536 (default 3072).
               LMOCI_MAX_COST_USD:  dollar cap between 0.00 and 100.00 (default 2.00).
-              Every sandbox run (oci.run(run_id, ledger_dir)) tears down owned resources in reverse order on exit or error.
+              Every sandbox run (oci.with_sandbox(name, fn)) tears down owned resources in reverse order on exit or error.
             """;
+
+    private record FileArgument(String path, int priority) {}
 
     private Main() {}
 
@@ -79,86 +88,66 @@ public final class Main {
             List<Object> overloads = (List<Object>) target.computeIfAbsent(binding.name, k -> new ArrayList<>());
             overloads.add(spec);
         }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("type", "Json");
+        result.put("nullable", true);
         Map<String, Object> all = new LinkedHashMap<>();
         all.put("dsl.schema", 2);
         all.put("name", "lmoci");
         all.put("functions", functions);
         all.put("types", types);
+        all.put("result", result);
         all.put("context", context);
         return (Jsons.stringify(all) + "\n").getBytes(StandardCharsets.UTF_8);
     }
 
-    static int run(String[] args) throws Exception {
-        if (args.length > 0 && CliArea.isArea(args[0])) {
-            return CliArea.run(args[0], Arrays.asList(args).subList(1, args.length));
+    static int run(String[] args) {
+        try {
+            return runChecked(args);
+        } catch (OutOfMemoryError error) {
+            return Reports.failureFrame(System.out, "run", VmException.run("LMOCI_MAX_MEMORY_MB memory budget exceeded"));
+        } catch (VmException error) {
+            return Reports.failureFrame(System.out, phase(error), error);
+        } catch (Exception error) {
+            return Reports.failureFrame(System.out, "run", VmException.host(message(error)));
         }
+    }
 
-        List<String> remaining = new ArrayList<>();
-        boolean dryRun = false;
-        boolean apply = false;
-        boolean live = false;
-        String profile = null;
-        String region = null;
-        String endpoint = null;
-
-        for (int index = 0; index < args.length; index++) {
-            String arg = args[index];
+    private static int runChecked(String[] args) throws Exception {
+        if (args == null || args.length == 0) {
+            return Reports.failureFrame(System.out, "cli", new VmException("CLI_USAGE", USAGE));
+        }
+        for (String arg : args) {
             if ("--dry-run".equals(arg)) {
-                dryRun = true;
-            } else if ("--apply".equals(arg)) {
-                apply = true;
-            } else if ("--live".equals(arg)) {
-                live = true;
-            } else if ("--profile".equals(arg) && index + 1 < args.length) {
-                profile = args[++index];
-            } else if ("--region".equals(arg) && index + 1 < args.length) {
-                region = args[++index];
-            } else if ("--endpoint".equals(arg) && index + 1 < args.length) {
-                endpoint = args[++index];
-            } else {
-                remaining.add(arg);
+                return Reports.failureFrame(System.out, "cli", new VmException("CLI_USAGE", USAGE));
             }
         }
 
-        if (dryRun) {
-            System.setProperty("lmoci.dryRun", "true");
+        // Product-specific direct command areas are separate from lmcode invocation flags.
+        if (CliArea.isArea(args[0])) {
+            return CliArea.run(args[0], Arrays.asList(args).subList(1, args.length));
         }
-        if (live && !dryRun) {
-            System.setProperty("lmoci.live", "true");
-        }
-        if (apply && !dryRun) {
-            System.setProperty("lmoci.apply", "true");
-        }
-        if (profile != null) {
-            System.setProperty("lmoci.profile", profile);
-        }
-        if (region != null) {
-            System.setProperty("lmoci.region", region);
-        }
-        if (endpoint != null) {
-            System.setProperty("lmoci.endpoint", endpoint);
-        }
-
-        Map<String, String> env = System.getenv();
-        final CloudHost host;
-        try {
-            SafetyChecks.rejectUnapprovedCiLiveCredentials(env);
-            host = new CloudHost(env);
-        } catch (IllegalArgumentException | IllegalStateException exc) {
-            System.err.println(exc.getMessage());
-            return 2;
-        }
-
-        String[] cleanArgs = remaining.toArray(new String[0]);
-        if (Arrays.equals(cleanArgs, new String[] {"--version"}) || Arrays.equals(cleanArgs, new String[] {"-v"})) {
+        if (args.length == 1 && "--version".equals(args[0])) {
+            int config = validateUtilityConfig();
+            if (config != 0) {
+                return config;
+            }
             System.out.println("lmoci " + VERSION);
             return 0;
         }
-        if (Arrays.equals(cleanArgs, new String[] {"--help"}) || Arrays.equals(cleanArgs, new String[] {"-h"})) {
+        if (args.length == 1 && ("--help".equals(args[0]) || "-h".equals(args[0]))) {
+            int config = validateUtilityConfig();
+            if (config != 0) {
+                return config;
+            }
             System.out.print(HELP);
             return 0;
         }
-        if (Arrays.equals(cleanArgs, new String[] {"--notices"})) {
+        if (args.length == 1 && "--notices".equals(args[0])) {
+            int config = validateUtilityConfig();
+            if (config != 0) {
+                return config;
+            }
             try (InputStream in = Main.class.getResourceAsStream("/THIRD_PARTY_NOTICES")) {
                 if (in == null) {
                     throw new IOException("THIRD_PARTY_NOTICES resource missing");
@@ -167,115 +156,247 @@ public final class Main {
             }
             return 0;
         }
-
-        Thread shutdown = new Thread(() -> {
-            try {
-                host.close();
-            } catch (RuntimeException exc) {
-                System.err.println("lmoci teardown incomplete; inspect the sandbox ledger");
+        if (args.length == 1 && "--self-test".equals(args[0])) {
+            return runSelfTest();
+        }
+        if (args.length == 4 && "--sweep".equals(args[0]) && "--older-than-hours".equals(args[2])) {
+            int config = validateUtilityConfig();
+            if (config != 0) {
+                return config;
             }
-        }, "lmoci-teardown");
-        Runtime.getRuntime().addShutdownHook(shutdown);
+            long hours;
+            try {
+                hours = Long.parseLong(args[3]);
+            } catch (NumberFormatException error) {
+                return Reports.failureFrame(System.out, "cli", new VmException("CLI_USAGE", "--older-than-hours must be an integer"));
+            }
+            System.out.println(Jsons.stringify(Sandbox.leftovers(Path.of(args[1]), hours)));
+            return 0;
+        }
 
-        try (host) {
+        Map<String, String> env = System.getenv();
+        if (args[0].equals("--lmcode-schema")) {
+            if (args.length > 2 || (args.length == 2 && !args[1].equals("--json"))) {
+                return Reports.failureFrame(System.out, "cli", new VmException("CLI_USAGE", USAGE));
+            }
+            try (CloudHost host = new CloudHost(env)) {
+                byte[] bytes = schema(host.registry());
+                System.out.write(bytes);
+                return System.out.checkError() ? 4 : 0;
+            }
+        }
+        if (args[0].equals("--lmcode-signatures")) {
+            if (args.length > 2 || (args.length == 2 && !args[1].equals("--without-std"))) {
+                return Reports.failureFrame(System.out, "cli", new VmException("CLI_USAGE", USAGE));
+            }
+            try (CloudHost host = new CloudHost(env)) {
+                Registry registry = host.registry();
+                List<String> signatures = args.length == 2 ? registry.hostSignatures() : registry.signatures();
+                signatures.stream().sorted().forEach(System.out::println);
+                return System.out.checkError() ? 4 : 0;
+            }
+        }
+
+        List<FileArgument> files = parseFiles(args);
+        List<String> parsedFiles = files.stream().map(FileArgument::path).toList();
+        final InvocationResults results;
+        try {
+            // Strict manifest validation precedes host construction, schema setup, bytecode loading, and callbacks.
+            results = InvocationResults.fromCommand(parsedFiles);
+        } catch (VmException error) {
+            return Reports.failureFrame(System.out, "cli", error);
+        }
+
+        CloudHost host = null;
+        String stage = "setup";
+        Integer currentPart = null;
+        try {
+            Map<String, String> currentEnv = System.getenv();
+            SafetyChecks.rejectUnapprovedCiLiveCredentials(currentEnv);
+            host = new CloudHost(currentEnv);
             Registry registry = host.registry();
             byte[] schemaBytes = schema(registry);
+            registry.checkSchemaSignatures(schemaBytes);
+            ResultContract contract = ResultContract.fromSchema(new String(schemaBytes, StandardCharsets.UTF_8));
 
-            if (cleanArgs.length >= 1
-                    && "--lmcode-schema".equals(cleanArgs[0])
-                    && (cleanArgs.length == 1 || (cleanArgs.length == 2 && "--json".equals(cleanArgs[1])))) {
-                System.out.write(schemaBytes);
-                return 0;
-            }
-            if (Arrays.equals(cleanArgs, new String[] {"--lmcode-signatures", "--without-std"})) {
-                registry.hostSignatures().forEach(System.out::println);
-                return 0;
-            }
-            if (Arrays.equals(cleanArgs, new String[] {"--lmcode-signatures"})) {
-                registry.signatures().forEach(System.out::println);
-                return 0;
-            }
-            if (cleanArgs.length == 4
-                    && "--sweep".equals(cleanArgs[0])
-                    && "--older-than-hours".equals(cleanArgs[2])) {
-                long hours = Long.parseLong(cleanArgs[3]);
-                System.out.println(Jsons.stringify(Sandbox.leftovers(Path.of(cleanArgs[1]), hours)));
-                return 0;
-            }
-            if (Arrays.equals(cleanArgs, new String[] {"--self-test"})) {
-                runSelfTests(registry, schemaBytes);
-                return 0;
-            }
-            if (cleanArgs.length != 2 || !"--lmcode".equals(cleanArgs[0])) {
-                System.err.print(HELP);
-                return 2;
-            }
-
+            stage = "load";
             long budgetBytes = host.runtimeBudget().maxMemoryBytes();
-            Path input = Path.of(cleanArgs[1]);
-            if (!Files.isRegularFile(input)) {
-                throw VmException.run("DSL input file does not exist: " + input);
+            List<Program> programs = new ArrayList<>(files.size());
+            for (int index = 0; index < files.size(); index++) {
+                FileArgument file = files.get(index);
+                InvocationResults.Registration registration = results.registrations().get(index);
+                currentPart = registration.index();
+                Path path = Path.of(file.path());
+                if (!Files.isRegularFile(path)) {
+                    results.fail(registration.index(), "load", VmException.badBytecode("cannot read lmcode file: " + file.path()));
+                    return results.writeFrame(System.out);
+                }
+                long size = Files.size(path);
+                long inputLimit = Math.min(budgetBytes / 4, 64L * 1024L * 1024L);
+                if (size > inputLimit) {
+                    results.fail(registration.index(), "load", VmException.badBytecode("LMOCI_MAX_MEMORY_MB bytecode input exceeds memory budget"));
+                    return results.writeFrame(System.out);
+                }
+                try {
+                    programs.add(Program.load(Files.readAllBytes(path), schemaBytes, registry));
+                } catch (IOException error) {
+                    results.fail(registration.index(), "load", VmException.badBytecode("cannot read lmcode file: " + file.path()));
+                    return results.writeFrame(System.out);
+                } catch (VmException error) {
+                    results.fail(registration.index(), "load", error);
+                    return results.writeFrame(System.out);
+                }
             }
-            byte[] bytecode = loadBytecode(input, schemaBytes, budgetBytes);
-            Program program = Program.load(bytecode, schemaBytes, registry);
-            program.run(host.context(budgetBytes), registry);
-            host.close();
-            return Reports.ok("null");
+
+            Context context = host.context(budgetBytes, results.dry());
+            context.setDry(results.dry());
+            List<Integer> order = new ArrayList<>();
+            for (int index = 0; index < files.size(); index++) {
+                order.add(index);
+            }
+            order.sort(Comparator.comparingInt(index -> files.get(index).priority()));
+            stage = "run";
+            for (int index : order) {
+                InvocationResults.Registration registration = results.registrations().get(index);
+                currentPart = registration.index();
+                try {
+                    results.select(registration.index(), registry, contract);
+                    context.resetBudget();
+                    programs.get(index).run(context, registry);
+                    results.complete(registration.index());
+                } catch (VmException error) {
+                    results.fail(registration.index(), phase(error), error);
+                    break;
+                } catch (RuntimeException error) {
+                    results.fail(registration.index(), "run", VmException.host(message(error)));
+                    break;
+                }
+            }
+        } catch (VmException error) {
+            results.fail(currentPart, stage.equals("setup") ? "cli" : phaseForStage(stage, error),
+                    stage.equals("setup") ? new VmException("CLI_USAGE", error.getMessage()) : error);
+        } catch (IllegalArgumentException | IllegalStateException error) {
+            if (stage.equals("setup")) {
+                results.fail(null, "cli", new VmException("CLI_USAGE", message(error)));
+            } else if (stage.equals("load")) {
+                results.fail(currentPart, "load", VmException.badBytecode(message(error)));
+            } else {
+                results.fail(currentPart, "run", VmException.host(message(error)));
+            }
+        } catch (RuntimeException error) {
+            results.fail(currentPart, stage.equals("load") ? "load" : "run",
+                    stage.equals("load") ? VmException.badBytecode(message(error)) : VmException.host(message(error)));
+        } catch (OutOfMemoryError error) {
+            results.fail(currentPart, stage.equals("setup") ? "cli" : "run",
+                    stage.equals("setup") ? new VmException("CLI_USAGE", "LMOCI_MAX_MEMORY_MB setup exceeded memory budget")
+                            : VmException.run("LMOCI_MAX_MEMORY_MB memory budget exceeded"));
         } finally {
-            try {
-                Runtime.getRuntime().removeShutdownHook(shutdown);
-            } catch (IllegalStateException ignored) {
-            }
-        }
-    }
-
-    private static byte[] loadBytecode(Path input, byte[] schemaBytes, long budgetBytes) throws Exception {
-        if (Files.size(input) > Math.min(budgetBytes / 4, 64L * 1024L * 1024L)) {
-            throw VmException.run("LMOCI_MAX_MEMORY_MB bytecode input exceeds memory budget");
-        }
-        byte[] raw = Files.readAllBytes(input);
-        if (input.getFileName().toString().endsWith(".lms")) {
-            Path tempDir = Files.createTempDirectory("lmoci-lms-");
-            try {
-                Path schemaFile = tempDir.resolve("lmoci.dsl.json");
-                Path outFile = tempDir.resolve("compiled.dslb");
-                Path wrapper = tempDir.resolve("wrapper.lms");
-                Files.write(schemaFile, schemaBytes);
-                String src = new String(raw, StandardCharsets.UTF_8);
-                String wrapped = "p = _dsl_ schema=" + Jsons.stringify(schemaFile.toString()) + ";\n"
-                        + src + "\nend _dsl_\nsavedsl(p, " + Jsons.stringify(outFile.toString()) + ");\n";
-                Files.writeString(wrapper, wrapped, StandardCharsets.UTF_8);
-                Process proc = new ProcessBuilder("lmscript", wrapper.toString())
-                        .redirectErrorStream(true)
-                        .start();
-                String output = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-                int code = proc.waitFor();
-                if (code != 0 || !Files.isRegularFile(outFile)) {
-                    throw VmException.host("lmscript compile failed: " + output.trim());
-                }
-                return Files.readAllBytes(outFile);
-            } finally {
-                try (var stream = Files.walk(tempDir)) {
-                    stream.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                        try {
-                            Files.deleteIfExists(p);
-                        } catch (IOException ignored) {
-                        }
-                    });
+            if (host != null) {
+                try {
+                    host.close();
+                } catch (RuntimeException closeError) {
+                    results.fail(null, "run", VmException.host("lmoci teardown incomplete: " + message(closeError)));
                 }
             }
         }
-        return raw;
+        return results.writeFrame(System.out);
     }
 
-    private static void runSelfTests(Registry registry, byte[] schemaBytes) throws Exception {
-        registry.checkSchemaSignatures(schemaBytes);
-        Map<String, Object> analysis = PolicyAnalyzer.analyze(
-                "Allow any-user to manage all-resources in tenancy");
-        if (!"CRITICAL".equals(analysis.get("risk_level"))) {
-            throw new IllegalStateException("PolicyAnalyzer self-test failed");
+    private static List<FileArgument> parseFiles(String[] args) {
+        List<FileArgument> files = new ArrayList<>();
+        for (int index = 0; index < args.length;) {
+            String option = args[index++];
+            int priority;
+            if ("--lmcode".equals(option)) {
+                priority = 1;
+            } else if ("--first".equals(option)) {
+                priority = 0;
+            } else if ("--last".equals(option)) {
+                priority = 2;
+            } else {
+                throw new VmException("CLI_USAGE", USAGE);
+            }
+            if (index >= args.length || args[index].isEmpty() || args[index].startsWith("--")) {
+                throw new VmException("CLI_USAGE", USAGE);
+            }
+            files.add(new FileArgument(args[index++], priority));
+            if (option.equals("--lmcode")) {
+                while (index < args.length && !args[index].startsWith("--")) {
+                    files.add(new FileArgument(args[index++], priority));
+                }
+            }
         }
-        SelfTest.main(new String[0]);
+        if (files.isEmpty()) {
+            throw new VmException("CLI_USAGE", USAGE);
+        }
+        return List.copyOf(files);
+    }
+
+    private static int runSelfTest() {
+        Map<String, String> env = System.getenv();
+        try {
+            SafetyChecks.rejectUnapprovedCiLiveCredentials(env);
+        } catch (IllegalStateException error) {
+            System.err.println(error.getMessage());
+            return 2;
+        }
+        try (CloudHost host = new CloudHost(env)) {
+            Registry registry = host.registry();
+            byte[] schemaBytes = schema(registry);
+            registry.checkSchemaSignatures(schemaBytes);
+            Map<String, Object> analysis = PolicyAnalyzer.analyze("Allow any-user to manage all-resources in tenancy");
+            if (!"CRITICAL".equals(analysis.get("risk_level"))) {
+                throw new IllegalStateException("PolicyAnalyzer self-test failed");
+            }
+            Context context = host.context(host.runtimeBudget().maxMemoryBytes(), false);
+            if (context.get("oci") == null || registry.signatures().isEmpty()) {
+                throw new IllegalStateException("lmcode host self-test failed");
+            }
+            return 0;
+        } catch (RuntimeException error) {
+            return Reports.failureFrame(System.out, "run", VmException.host(message(error)));
+        } catch (Exception error) {
+            return Reports.failureFrame(System.out, "run", VmException.host(message(error)));
+        }
+    }
+
+    private static String phase(VmException error) {
+        if (error.code.equals("CLI_USAGE")) {
+            return "cli";
+        }
+        if (error.code.equals("APP_FAIL")) {
+            return "app";
+        }
+        if (error.code.startsWith("LOAD_")) {
+            return "load";
+        }
+        return "run";
+    }
+
+    private static int validateUtilityConfig() {
+        Map<String, String> env = System.getenv();
+        try {
+            RuntimeBudget.fromEnv(env);
+            CostLedger.fromEnv(env);
+            return 0;
+        } catch (IllegalArgumentException error) {
+            System.err.println(error.getMessage());
+            return 2;
+        }
+    }
+
+    private static String phaseForStage(String stage, VmException error) {
+        if (stage.equals("setup")) {
+            return "cli";
+        }
+        if (stage.equals("load")) {
+            return "load";
+        }
+        return phase(error);
+    }
+
+    private static String message(Throwable error) {
+        return error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
     }
 
     public static void main(String[] args) {
@@ -284,24 +405,10 @@ public final class Main {
         int status;
         try {
             status = run(args);
-        } catch (OutOfMemoryError err) {
-            String text = "LMOCI_MAX_MEMORY_MB memory budget exceeded";
-            System.err.println(text);
-            status = Reports.error("run", VmException.run(text));
-        } catch (Exception exc) {
-            String text = exc.getMessage() == null ? exc.getClass().getSimpleName() : exc.getMessage();
-            if (text.contains("memory budget")) {
-                text = "LMOCI_MAX_MEMORY_MB: " + text;
-            }
-            System.err.println(text);
-            VmException error = exc instanceof VmException vm
-                    ? new VmException(vm.code, text)
-                    : VmException.host(text);
-            if (exc instanceof VmException vm) {
-                error.line = vm.line;
-                error.column = vm.column;
-            }
-            status = Reports.error("run", error);
+        } catch (OutOfMemoryError error) {
+            status = Reports.failureFrame(System.out, "run", VmException.run("LMOCI_MAX_MEMORY_MB memory budget exceeded"));
+        } catch (Exception error) {
+            status = Reports.failureFrame(System.out, "run", VmException.host(message(error)));
         }
         if (status != 0) {
             System.exit(status);

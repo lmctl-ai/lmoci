@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix="lmoci-host-protocol-") as scratch:
     dry = json.loads((work / "dry-result.json").read_text(encoding="utf-8"))
     dry_frame = json.loads((work / "dry-frame.json").read_text(encoding="utf-8"))
     assert dry["ok"] is True, dry
-    assert dry_frame == {"ok": True, "result": {"demo": True, "namespace": None}, "dry": True}, dry_frame
+    assert dry_frame == {"ok": True, "result": {"demo": True, "namespace": ""}, "dry": True}, dry_frame
     assert not (work / "dry-work" / "effect-sentinel.txt").exists()
     assert (work / "dry-calls.txt").read_text(encoding="utf-8").splitlines() == ["host"]
 
