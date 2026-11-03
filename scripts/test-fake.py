@@ -17,7 +17,7 @@ import urllib.parse
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.1.0-all.jar")
+HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.2.0-all.jar")
 
 
 def host_cmd() -> list[str]:
@@ -566,17 +566,24 @@ def main() -> None:
 
     base_env = dict(os.environ)
     base_env["LMOCI_ENDPOINT"] = endpoint
+    command = host_cmd()
+    base_env["LMOCI_HOST"] = command[0]
+    base_env["LMOCI_HOST_ARG1"] = command[1] if len(command) > 1 else ""
+    base_env["LMOCI_HOST_ARG2"] = command[2] if len(command) > 2 else ""
 
     with tempfile.TemporaryDirectory(prefix="lmoci-fake-") as tmp:
         d = Path(tmp)
 
         # 1. Compile and execute a comprehensive lmscript program against the fake OCI server
         lms_path = d / "fake_full.lms"
-        dslb_path = d / "fake_full.dslb"
         ledger_dir = d / "ledgers"
+        STATE.requests.clear()
+        STATE.deletes.clear()
+        (d / "lib").mkdir()
+        shutil.copyfile(ROOT / "examples" / "lib" / "lmoci-host.lms", d / "lib" / "lmoci-host.lms")
         lms_path.write_text(
-            f"""
-p = _dsl_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};
+            'import "./lib/lmoci-host.lms";\n' + f"""
+p = _lmcode_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};
 let cloud = oci.endpoint("us-ashburn-1", {json.dumps(endpoint)});
 check(!cloud.is_demo());
 
@@ -650,24 +657,14 @@ check(run.describe(r_bkt).get("status") == "ACTIVE");
 run.cleanup();
 check(run.remaining() == 0);
 check(run.estimated_cost() > 0.0);
-end _dsl_
-savedsl(p, {json.dumps(str(dslb_path))});
+end _lmcode_
+lmoci_host.run(p);
 """,
             encoding="utf-8",
         )
-        comp = subprocess.run([lmscript, str(lms_path)], text=True, capture_output=True, timeout=60, check=False)
-        assert comp.returncode == 0, comp.stderr
+        comp = subprocess.run([lmscript, str(lms_path)], env=base_env, text=True, capture_output=True, timeout=120, check=False)
+        assert comp.returncode == 0, (comp.stdout, comp.stderr)
 
-        STATE.deletes.clear()
-        proc = subprocess.run(
-            host_cmd() + ["--lmcode", str(dslb_path)],
-            env=base_env,
-            text=True,
-            capture_output=True,
-            timeout=120,
-            check=False,
-        )
-        assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
         assert len(STATE.requests) >= 30, f"Expected >= 30 signed requests, got {len(STATE.requests)}"
 
         # Verify reverse-order teardown of the 6 sandbox resources:
@@ -696,31 +693,24 @@ savedsl(p, {json.dumps(str(dslb_path))});
 
         # 2. Verify automatic teardown when a script throws mid-run
         abort_lms = d / "abort.lms"
-        abort_dslb = d / "abort.dslb"
         abort_lms.write_text(
-            f"""
-p = _dsl_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};
+            'import "./lib/lmoci-host.lms";\n' + f"""
+p = _lmcode_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};
 let cloud = oci.endpoint("us-ashburn-1", {json.dumps(endpoint)});
 let run = cloud.run("abort01", {json.dumps(str(ledger_dir))});
 let b = run.bucket("tempbkt");
 let q = run.queue("tempq");
 check(false);
-end _dsl_
-savedsl(p, {json.dumps(str(abort_dslb))});
+end _lmcode_
+abort_result = run_lmcode(p, {{command: lmoci_host.command()}});
+write_file("abort-result.json", json_stringify(abort_result));
 """,
             encoding="utf-8",
         )
-        subprocess.run([lmscript, str(abort_lms)], check=True, capture_output=True, timeout=60)
         STATE.deletes.clear()
-        abort_proc = subprocess.run(
-            host_cmd() + ["--lmcode", str(abort_dslb)],
-            env=base_env,
-            text=True,
-            capture_output=True,
-            timeout=60,
-            check=False,
-        )
-        assert abort_proc.returncode == 3
+        subprocess.run([lmscript, str(abort_lms)], cwd=d, env=base_env, check=True, capture_output=True, timeout=120)
+        abort_result = json.loads((d / "abort-result.json").read_text(encoding="utf-8"))
+        assert not abort_result.get("ok") and abort_result.get("phase") == "app" and abort_result.get("code") == "APP_FAIL", abort_result
         abort_deletes = [item[1] for item in STATE.deletes if "lmoci-abort01-" in item[1]]
         assert len(abort_deletes) == 2, abort_deletes
         assert abort_deletes[0].endswith("lmoci-abort01-tempq")

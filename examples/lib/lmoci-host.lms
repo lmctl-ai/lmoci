@@ -1,0 +1,30 @@
+# Shared lmcode invocation path for lmoci examples. The compiler writes manifest v1 and consumes the terminal return frame.
+package lmoci_host;
+
+fn command_prefix() {
+  executable = getenv("LMOCI_HOST");
+  if (executable == null || executable == "") { executable = "lmoci"; }
+  command = [executable];
+  arg1 = getenv("LMOCI_HOST_ARG1");
+  if (arg1 != null && arg1 != "") { push(command, arg1); }
+  arg2 = getenv("LMOCI_HOST_ARG2");
+  if (arg2 != null && arg2 != "") { push(command, arg2); }
+  push(command, "--lmcode");
+  push(command, "$DSLFILE");
+  return command;
+}
+
+fn command() {
+  return command_prefix();
+}
+
+fn run(program) {
+  result = run_lmcode(program, {command: command_prefix()});
+  if (!result.ok) {
+    line = "";
+    if (result.has("line")) { line = f" (line {result.line})"; }
+    println(f"lmoci {result.phase} error {result.code}{line}: {result.message}");
+    exit(1);
+  }
+  return result.result;
+}

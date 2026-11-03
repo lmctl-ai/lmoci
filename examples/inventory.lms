@@ -1,6 +1,7 @@
+import "./lib/lmoci-host.lms";
 # Full 16-section OCI inventory in offline demo mode (or live when LMOCI_ENDPOINT is set).
 mkdir("data");
-oci = _dsl_ schema="../schema/lmoci.dsl.json";
+oci = _lmcode_ schema="../schema/lmoci.dsl.json";
 let cloud = oci.demo();
 check(cloud.is_demo());
 check(cloud.identity().len() == 1);
@@ -22,5 +23,5 @@ check(cloud.tenancies().len() >= 1);
 cloud.buckets().csv("data/oci-buckets.csv");
 let snap = cloud.snapshot();
 file_write("data/oci-snapshot.json", snap.json());
-end _dsl_
-savedsl(oci, "data/inventory-oci.dslb");
+end _lmcode_
+lmoci_host.run(oci);

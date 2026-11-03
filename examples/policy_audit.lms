@@ -1,6 +1,7 @@
+import "./lib/lmoci-host.lms";
 # Offline OCI IAM policy risk analyzer.
 mkdir("data");
-oci = _dsl_ schema="../schema/lmoci.dsl.json";
+oci = _lmcode_ schema="../schema/lmoci.dsl.json";
 let cloud = oci.demo();
 let safe_report = cloud.analyze_policy("Allow group Auditors to read all-resources in compartment ops");
 check(safe_report.get("risk_level") == "LOW");
@@ -8,5 +9,5 @@ let risky_report = cloud.analyze_policy("Allow any-user to manage all-resources 
 check(risky_report.get("risk_level") == "CRITICAL");
 check(risky_report.number("any_user_count") == 1);
 check(risky_report.number("manage_all_count") == 1);
-end _dsl_
-savedsl(oci, "data/policy-audit-oci.dslb");
+end _lmcode_
+lmoci_host.run(oci);

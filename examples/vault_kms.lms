@@ -1,6 +1,7 @@
+import "./lib/lmoci-host.lms";
 # OCI Vault & KMS envelope encryption and redacted secret lifecycle.
 mkdir("data");
-oci = _dsl_ schema="../schema/lmoci.dsl.json";
+oci = _lmcode_ schema="../schema/lmoci.dsl.json";
 let cloud = oci.demo();
 let vault = cloud.vault_create("lmoci-demo-vault");
 let key = cloud.key_create("lmoci-master-key");
@@ -13,5 +14,5 @@ check(dec.get("plaintext") == "classified-payload-2026");
 let sec = cloud.secret_create("app-db-pass", vault.get("id"), kid, "super-secret-value");
 let bundle = cloud.secret_get(sec.get("id"));
 check(bundle.get("secret_value") == "***REDACTED***");
-end _dsl_
-savedsl(oci, "data/vault-kms-oci.dslb");
+end _lmcode_
+lmoci_host.run(oci);

@@ -19,10 +19,10 @@ if [[ "${LMOCI_NATIVE:-0}" == "1" ]]; then
     python3 scripts/check-linux-linkage.py "$HOST"
   fi
 else
-  if [[ ! -f target/lmoci-0.1.0-all.jar ]]; then
+  if [[ ! -f target/lmoci-0.2.0-all.jar ]]; then
     mvn -q package -DskipTests
   fi
-  HOST="$ROOT/target/lmoci-0.1.0-all.jar"
+  HOST="$ROOT/target/lmoci-0.2.0-all.jar"
 fi
 
 if [[ "$HOST" == *.jar ]]; then
@@ -33,6 +33,7 @@ fi
 python3 scripts/check-lmcode-host.py
 python3 scripts/test-host-protocol.py "$HOST" "$(command -v lmscript)"
 python3 scripts/test-operation-parity.py "$HOST" "$(command -v lmscript)"
+python3 scripts/test-lmoci-dry-spy.py "$(command -v lmscript)" "$HOST" schema/lmoci.dsl.json
 python3 scripts/test-cli.py "$HOST"
 python3 scripts/test-cred.py "$HOST"
 python3 scripts/test-fake.py "$HOST"

@@ -1,6 +1,7 @@
+import "./lib/lmoci-host.lms";
 # OCI Streaming pipeline: create stream, publish record, create cursor, and consume messages.
 mkdir("data");
-oci = _dsl_ schema="../schema/lmoci.dsl.json";
+oci = _lmcode_ schema="../schema/lmoci.dsl.json";
 let cloud = oci.demo();
 let run = cloud.run("sdemo01", "data/ledgers");
 let stream = run.stream("telemetry");
@@ -15,5 +16,5 @@ check(msgs.len() == 1);
 check(msgs.at(0).get("value") == "cpu=42.5");
 run.cleanup();
 check(run.remaining() == 0);
-end _dsl_
-savedsl(oci, "data/streaming-cursor-oci.dslb");
+end _lmcode_
+lmoci_host.run(oci);

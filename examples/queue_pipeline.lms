@@ -1,6 +1,7 @@
+import "./lib/lmoci-host.lms";
 # OCI Queue pipeline: sandbox queue creation, message publish, receive, and delete receipt.
 mkdir("data");
-oci = _dsl_ schema="../schema/lmoci.dsl.json";
+oci = _lmcode_ schema="../schema/lmoci.dsl.json";
 let cloud = oci.demo();
 let run = cloud.run("qdemo01", "data/ledgers");
 let q = run.queue("events");
@@ -15,5 +16,5 @@ let ack = cloud.queue_delete_message(qid, first.get("receipt"));
 check(ack.get("deleted") == "true");
 run.cleanup();
 check(run.remaining() == 0);
-end _dsl_
-savedsl(oci, "data/queue-pipeline-oci.dslb");
+end _lmcode_
+lmoci_host.run(oci);

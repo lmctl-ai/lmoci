@@ -13,7 +13,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.1.0-all.jar")
+HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.2.0-all.jar")
 BASE_ENV = dict(os.environ)
 for k in (
     "LMOCI_ENDPOINT",
@@ -40,6 +40,15 @@ def host_cmd() -> list[str]:
     return [str(HOST)]
 
 
+def lmscript_host_env() -> dict[str, str]:
+    command = host_cmd()
+    env = dict(BASE_ENV)
+    env["LMOCI_HOST"] = command[0]
+    env["LMOCI_HOST_ARG1"] = command[1] if len(command) > 1 else ""
+    env["LMOCI_HOST_ARG2"] = command[2] if len(command) > 2 else ""
+    return env
+
+
 def run(args: list[str], code: int = 0, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     env = dict(BASE_ENV)
     if extra:
@@ -63,7 +72,7 @@ def run(args: list[str], code: int = 0, extra: dict[str, str] | None = None) -> 
 
 
 def main() -> None:
-    assert run(["--version"]).stdout == "lmoci 0.1.0\n"
+    assert run(["--version"]).stdout == "lmoci 0.2.0\n"
     assert run(["--notices"]).stdout == (ROOT / "THIRD_PARTY_NOTICES").read_text(encoding="utf-8")
     assert "LMOCI_MAX_MEMORY_MB" in run(["--help"]).stdout
     assert "\u2014 Oracle Cloud" in run(
@@ -128,76 +137,39 @@ def main() -> None:
         bad.write_bytes(b"not bytecode")
         run(["--lmcode", str(bad)], 3)
 
-        # Memory budget enforcement
+        # Memory budget enforcement through the version-1 run_lmcode manifest.
         budget_lms = d / "budget.lms"
-        budget_dslb = d / "budget.dslb"
+        command_literal = json.dumps(host_cmd() + ["--lmcode", "$DSLFILE"])
         budget_lms.write_text(
-            "p = _dsl_ schema="
-            + json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))
-            + ";\nlet i = 0; while (i < 10000) { let data = str_repeat(\"x\", 1000000); i = i + 1; }\n"
-            + "end _dsl_\nsavedsl(p, "
-            + json.dumps(str(budget_dslb))
-            + ");\n",
+            f'p = _lmcode_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};\n'
+            'let i = 0; while (i < 10000) { let data = str_repeat("x", 1000000); i = i + 1; }\n'
+            'end _lmcode_\n'
+            f'r = run_lmcode(p, {{command: {command_literal}}});\n'
+            'write_file("budget-result.json", json_stringify(r));\n',
             encoding="utf-8",
         )
-        comp = subprocess.run([lmscript, str(budget_lms)], text=True, capture_output=True, timeout=60, check=False)
-        assert comp.returncode == 0, comp.stderr
-        small = run(["--lmcode", str(budget_dslb)], 3, {"LMOCI_MAX_MEMORY_MB": "64"})
-        assert "LMOCI_MAX_MEMORY_MB" in small.stderr and "memory budget" in small.stdout
+        small_env = dict(BASE_ENV, LMOCI_MAX_MEMORY_MB="64", HOME=str(d / "budget-home"))
+        Path(small_env["HOME"]).mkdir()
+        comp = subprocess.run([lmscript, str(budget_lms)], cwd=d, env=small_env,
+                              text=True, capture_output=True, check=False)
+        assert comp.returncode == 0, (comp.stdout, comp.stderr)
+        budget = json.loads((d / "budget-result.json").read_text(encoding="utf-8"))
+        assert budget.get("ok") is False and "memory budget" in budget.get("message", ""), budget
 
-        # --dry-run enforcement even when pointing at an unreachable endpoint
-        dry_lms = d / "dry.lms"
-        dry_dslb = d / "dry.dslb"
-        dry_lms.write_text(
-            "p = _dsl_ schema="
-            + json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))
-            + ";\nlet cloud = oci.endpoint(\"us-ashburn-1\", \"http://127.0.0.1:9\");\n"
-            + "check(cloud.is_demo());\n"
-            + "check(cloud.buckets().len() == 1);\n"
-            + "let owned = cloud.run(\"dry01\", "
-            + json.dumps(str(d / "ledgers"))
-            + ");\nlet b = owned.bucket(\"safe\");\ncheck(owned.remaining() == 1);\n"
-            + "owned.cleanup();\ncheck(owned.remaining() == 0);\nend _dsl_\n"
-            + "savedsl(p, "
-            + json.dumps(str(dry_dslb))
-            + ");\n",
-            encoding="utf-8",
-        )
-        comp = subprocess.run([lmscript, str(dry_lms)], text=True, capture_output=True, timeout=60, check=False)
-        assert comp.returncode == 0, comp.stderr
-        run(["--dry-run", "--lmcode", str(dry_dslb)], 0, {"LMOCI_MAX_MEMORY_MB": "128"})
-
-        # Compile and run all examples/*.lms in an isolated working copy
+        # The strict host protocol and callback dry controls run in test-host-protocol.py.
+        # Compile and execute every example in an isolated working copy through run_lmcode.
         work = d / "examples-work"
         work.mkdir()
         (work / "schema").mkdir()
-        (work / "examples").mkdir()
         shutil.copyfile(ROOT / "schema" / "lmoci.dsl.json", work / "schema" / "lmoci.dsl.json")
-        for example in sorted((ROOT / "examples").glob("*.lms")):
-            target_example = work / "examples" / example.name
-            shutil.copyfile(example, target_example)
-            comp = subprocess.run(
-                [lmscript, str(target_example)],
-                cwd=str(work),
-                text=True,
-                capture_output=True,
-                timeout=60,
-                check=False,
-            )
+        shutil.copytree(ROOT / "examples", work / "examples")
+        script_env = lmscript_host_env()
+        for example in sorted((work / "examples").glob("*.lms")):
+            comp = subprocess.run([lmscript, str(example)], cwd=work, env=script_env,
+                                  text=True, capture_output=True, check=False)
             assert comp.returncode == 0, (example.name, comp.stderr, comp.stdout)
-        for dslb in sorted((work / "data").glob("*.dslb")):
-            res = subprocess.run(
-                host_cmd() + ["--lmcode", str(dslb)],
-                cwd=str(work),
-                env=BASE_ENV,
-                text=True,
-                capture_output=True,
-                timeout=60,
-                check=False,
-            )
-            assert res.returncode == 0, (dslb.name, res.returncode, res.stdout, res.stderr)
 
-    print("PASS test-cli.py: CLI, schema/signature parity, budgets, dry-run, and examples")
+    print("PASS test-cli.py: schema/signature parity, memory budget, direct CLI and lmcode examples")
 
 
 if __name__ == "__main__":

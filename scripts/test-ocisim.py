@@ -18,7 +18,7 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.1.0-all.jar")
+HOST = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else (ROOT / "target" / "lmoci-0.2.0-all.jar")
 ENDPOINT = os.environ.get("LMOCI_OCISIM_URL", "http://127.0.0.1:4599")
 REQUIRED = os.environ.get("OCISIM_REQUIRED", "0") == "1"
 
@@ -94,36 +94,40 @@ def run_against(endpoint: str) -> None:
     regions = run_cli(endpoint, ["iam", "regions"])
     assert isinstance(regions, list) and len(regions) >= 1
 
-    # Also test DSL script execution against ocisim
+    # Also test run_lmcode execution against the local emulator.
     lmscript = shutil.which("lmscript")
     if lmscript is not None:
-        with tempfile.TemporaryDirectory(prefix="lmoci-ocisim-dsl-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="lmoci-ocisim-lmcode-") as tmp:
             d = Path(tmp)
+            (d / "lib").mkdir()
+            shutil.copyfile(ROOT / "examples" / "lib" / "lmoci-host.lms", d / "lib" / "lmoci-host.lms")
             lms = d / "ocisim.lms"
-            dslb = d / "ocisim.dslb"
             lms.write_text(
-                f"""p = _dsl_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};
+                'import "./lib/lmoci-host.lms";\n'
+                + f"""p = _lmcode_ schema={json.dumps(str(ROOT / "schema" / "lmoci.dsl.json"))};
 let cloud = oci.endpoint("us-ashburn-1", {json.dumps(endpoint)});
 check(!cloud.is_demo());
 let run = cloud.run("sim01", {json.dumps(str(d / "ledgers"))});
 let b = run.bucket("bkt");
-check(cloud.object_put("lmoci-sim01-bkt", "k.txt", "from-dsl").number("content_length") == 8);
-check(cloud.object_get("lmoci-sim01-bkt", "k.txt").get("content") == "from-dsl");
+check(cloud.object_put("lmoci-sim01-bkt", "k.txt", "from-lmcode").number("content_length") == 11);
+check(cloud.object_get("lmoci-sim01-bkt", "k.txt").get("content") == "from-lmcode");
 run.cleanup();
 check(run.remaining() == 0);
-end _dsl_
-savedsl(p, {json.dumps(str(dslb))});
+end _lmcode_
+lmoci_host.run(p);
 """,
                 encoding="utf-8",
             )
-            comp = subprocess.run([lmscript, str(lms)], text=True, capture_output=True, timeout=60, check=False)
-            assert comp.returncode == 0, comp.stderr
             env = dict(os.environ)
             env["LMOCI_ENDPOINT"] = endpoint
-            res = subprocess.run(host_cmd() + ["--lmcode", str(dslb)], env=env, text=True, capture_output=True, timeout=60, check=False)
-            assert res.returncode == 0, (res.returncode, res.stdout, res.stderr)
+            command = host_cmd()
+            env["LMOCI_HOST"] = command[0]
+            env["LMOCI_HOST_ARG1"] = command[1] if len(command) > 1 else ""
+            env["LMOCI_HOST_ARG2"] = command[2] if len(command) > 2 else ""
+            comp = subprocess.run([lmscript, str(lms)], cwd=d, env=env, text=True, capture_output=True, timeout=120, check=False)
+            assert comp.returncode == 0, (comp.stdout, comp.stderr)
 
-    print(f"PASS test-ocisim.py: live CLI + DSL round-trip against ocisim at {endpoint}")
+    print(f"PASS test-ocisim.py: direct CLI + lmcode round-trip against ocisim at {endpoint}")
 
 
 def main() -> None:
