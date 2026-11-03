@@ -6,7 +6,10 @@ makes ZERO mutating provider requests: a loopback HTTP spy answers OCI read rout
 and records every request. A real run of the same program must POST (control)."""
 import http.server, json, os, subprocess, sys, tempfile, threading
 
+from lmscript_runner import command as lmscript_command
+
 LMSCRIPT, HOST, SCHEMA = sys.argv[1], sys.argv[2], sys.argv[3]
+LMSCRIPT_CMD = lmscript_command(LMSCRIPT)
 seen = []
 
 class Spy(http.server.BaseHTTPRequestHandler):
@@ -62,10 +65,10 @@ println(json_stringify(r));
 with tempfile.TemporaryDirectory() as d:
     f = os.path.join(d, "dry.lms")
     open(f, "w").write(prog)
-    dry = subprocess.run([LMSCRIPT, "--dry-run", f], capture_output=True, text=True, timeout=120)
+    dry = subprocess.run(LMSCRIPT_CMD + ["--dry-run", f], capture_output=True, text=True, timeout=120)
     dry_seen = list(seen)
     del seen[:]
-    real = subprocess.run([LMSCRIPT, f], capture_output=True, text=True, timeout=120)
+    real = subprocess.run(LMSCRIPT_CMD + [f], capture_output=True, text=True, timeout=120)
     real_seen = list(seen)
 srv.shutdown()
 

@@ -7,10 +7,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+
+from lmscript_runner import command as lmscript_command
 import tempfile
 import threading
 
 LMSCRIPT, HOST, SCHEMA = sys.argv[1], sys.argv[2], str(Path(sys.argv[3]).resolve())
+LMSCRIPT_CMD = lmscript_command(LMSCRIPT)
 seen = []
 
 class Spy(BaseHTTPRequestHandler):
@@ -105,7 +108,7 @@ end _lmcode_
                 encoding="utf-8",
             )
             first = len(seen)
-            proc = subprocess.run([LMSCRIPT, str(driver)], cwd=work, env=env, text=True, capture_output=True, check=False)
+            proc = subprocess.run(LMSCRIPT_CMD + [str(driver)], cwd=work, env=env, text=True, capture_output=True, check=False)
             assert proc.returncode == 0, (mode, proc.stdout, proc.stderr)
             calls = list(seen[first:])
             result = json.loads((work / f"{mode}-result.json").read_text(encoding="utf-8"))

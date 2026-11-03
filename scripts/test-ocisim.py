@@ -10,6 +10,8 @@ import shutil
 import socket
 import subprocess
 import sys
+
+from lmscript_runner import command as lmscript_command
 import tempfile
 import time
 import urllib.error
@@ -95,8 +97,9 @@ def run_against(endpoint: str) -> None:
     assert isinstance(regions, list) and len(regions) >= 1
 
     # Also test run_lmcode execution against the local emulator.
-    lmscript = shutil.which("lmscript")
+    lmscript = os.environ.get("LMOCI_LMSCRIPT_BIN") or shutil.which("lmscript")
     if lmscript is not None:
+        lmscript_cmd = lmscript_command(lmscript)
         with tempfile.TemporaryDirectory(prefix="lmoci-ocisim-lmcode-") as tmp:
             d = Path(tmp)
             (d / "lib").mkdir()
@@ -124,7 +127,7 @@ lmoci_host.run(p);
             env["LMOCI_HOST"] = command[0]
             env["LMOCI_HOST_ARG1"] = command[1] if len(command) > 1 else ""
             env["LMOCI_HOST_ARG2"] = command[2] if len(command) > 2 else ""
-            comp = subprocess.run([lmscript, str(lms)], cwd=d, env=env, text=True, capture_output=True, timeout=120, check=False)
+            comp = subprocess.run(lmscript_cmd + [str(lms)], cwd=d, env=env, text=True, capture_output=True, timeout=120, check=False)
             assert comp.returncode == 0, (comp.stdout, comp.stderr)
 
     print(f"PASS test-ocisim.py: direct CLI + lmcode round-trip against ocisim at {endpoint}")

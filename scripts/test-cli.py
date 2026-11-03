@@ -9,6 +9,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+
+from lmscript_runner import command as lmscript_command
 import tempfile
 
 
@@ -86,10 +88,11 @@ def main() -> None:
     assert parsed_schema["name"] == "lmoci"
     assert "str_len" not in parsed_schema["functions"], "schema must omit built-in std functions"
 
-    lmscript = shutil.which("lmscript")
+    lmscript = os.environ.get("LMOCI_LMSCRIPT_BIN") or shutil.which("lmscript")
     assert lmscript is not None, "lmscript must be on PATH"
+    lmscript_cmd = lmscript_command(lmscript)
     sig_proc = subprocess.run(
-        [lmscript, "--lmcode-signatures", str(ROOT / "schema" / "lmoci.dsl.json")],
+        lmscript_cmd + ["--lmcode-signatures", str(ROOT / "schema" / "lmoci.dsl.json")],
         text=True,
         encoding="utf-8",
         capture_output=True,
@@ -100,7 +103,7 @@ def main() -> None:
     assert sig_proc.stdout == run(["--lmcode-signatures"]).stdout, "schema/registry signature mismatch"
 
     host_sig_proc = subprocess.run(
-        [lmscript, "--lmcode-signatures", str(ROOT / "schema" / "lmoci.dsl.json"), "--without-std"],
+        lmscript_cmd + ["--lmcode-signatures", str(ROOT / "schema" / "lmoci.dsl.json"), "--without-std"],
         text=True,
         encoding="utf-8",
         capture_output=True,
@@ -150,7 +153,7 @@ def main() -> None:
         )
         small_env = dict(BASE_ENV, LMOCI_MAX_MEMORY_MB="64", HOME=str(d / "budget-home"))
         Path(small_env["HOME"]).mkdir()
-        comp = subprocess.run([lmscript, str(budget_lms)], cwd=d, env=small_env,
+        comp = subprocess.run(lmscript_cmd + [str(budget_lms)], cwd=d, env=small_env,
                               text=True, capture_output=True, check=False)
         assert comp.returncode == 0, (comp.stdout, comp.stderr)
         budget = json.loads((d / "budget-result.json").read_text(encoding="utf-8"))
@@ -165,7 +168,7 @@ def main() -> None:
         shutil.copytree(ROOT / "examples", work / "examples")
         script_env = lmscript_host_env()
         for example in sorted((work / "examples").glob("*.lms")):
-            comp = subprocess.run([lmscript, str(example)], cwd=work, env=script_env,
+            comp = subprocess.run(lmscript_cmd + [str(example)], cwd=work, env=script_env,
                                   text=True, capture_output=True, check=False)
             assert comp.returncode == 0, (example.name, comp.stderr, comp.stdout)
 

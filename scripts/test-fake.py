@@ -11,6 +11,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+
+from lmscript_runner import command as lmscript_command
 import tempfile
 import threading
 import urllib.parse
@@ -561,8 +563,9 @@ def main() -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
-    lmscript = shutil.which("lmscript")
+    lmscript = os.environ.get("LMOCI_LMSCRIPT_BIN") or shutil.which("lmscript")
     assert lmscript is not None, "lmscript must be on PATH"
+    lmscript_cmd = lmscript_command(lmscript)
 
     base_env = dict(os.environ)
     base_env["LMOCI_ENDPOINT"] = endpoint
@@ -662,7 +665,7 @@ lmoci_host.run(p);
 """,
             encoding="utf-8",
         )
-        comp = subprocess.run([lmscript, str(lms_path)], env=base_env, text=True, capture_output=True, timeout=120, check=False)
+        comp = subprocess.run(lmscript_cmd + [str(lms_path)], env=base_env, text=True, capture_output=True, timeout=120, check=False)
         assert comp.returncode == 0, (comp.stdout, comp.stderr)
 
         assert len(STATE.requests) >= 30, f"Expected >= 30 signed requests, got {len(STATE.requests)}"
@@ -708,7 +711,7 @@ write_file("abort-result.json", json_stringify(abort_result));
             encoding="utf-8",
         )
         STATE.deletes.clear()
-        subprocess.run([lmscript, str(abort_lms)], cwd=d, env=base_env, check=True, capture_output=True, timeout=120)
+        subprocess.run(lmscript_cmd + [str(abort_lms)], cwd=d, env=base_env, check=True, capture_output=True, timeout=120)
         abort_result = json.loads((d / "abort-result.json").read_text(encoding="utf-8"))
         assert not abort_result.get("ok") and abort_result.get("phase") == "app" and abort_result.get("code") == "APP_FAIL", abort_result
         abort_deletes = [item[1] for item in STATE.deletes if "lmoci-abort01-" in item[1]]

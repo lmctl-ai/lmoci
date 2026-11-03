@@ -5,11 +5,14 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+
+from lmscript_runner import command as lmscript_command
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST = str(Path(sys.argv[1]).resolve())
 LMSCRIPT = sys.argv[2]
+LMSCRIPT_CMD = lmscript_command(LMSCRIPT)
 fixture = json.loads((ROOT / "testdata/lmcode-operation-parity-before.json").read_text(encoding="utf-8"))
 assert fixture["legacy_host_version"] == "lmoci 0.1.0"
 assert len(fixture["cases"]) >= 5
@@ -37,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix="lmoci-op-parity-") as scratch:
         )
         script = work / f"{case['name']}.lms"
         script.write_text(source, encoding="utf-8")
-        proc = subprocess.run([LMSCRIPT, str(script)], cwd=work, env=env, text=True, capture_output=True, check=False)
+        proc = subprocess.run(LMSCRIPT_CMD + [str(script)], cwd=work, env=env, text=True, capture_output=True, check=False)
         assert proc.returncode == 0, (case["name"], proc.stdout, proc.stderr)
         actual = json.loads((work / "actual.json").read_text(encoding="utf-8"))
         assert actual == case["legacy_result"], (case["name"], case["input_argv"], case["legacy_result"], actual)

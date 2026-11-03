@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+
+from lmscript_runner import command as lmscript_command
 import tempfile
 
 
@@ -19,6 +21,7 @@ def host_command(host):
 
 host = host_command(sys.argv[1])
 lmscript = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("LMSCRIPT_BIN", "lmscript")
+lmscript_cmd = lmscript_command(lmscript)
 root = Path(__file__).resolve().parents[1]
 schema_file = root / "schema" / "lmoci.dsl.json"
 
@@ -32,7 +35,7 @@ def host_run(args, code=0):
 schema_bytes = host_run(["--lmcode-schema", "--json"]).stdout.encode("utf-8")
 assert schema_bytes == schema_file.read_bytes(), "embedded lmcode schema differs byte-for-byte"
 signatures = host_run(["--lmcode-signatures"]).stdout
-proc = subprocess.run([lmscript, "--lmcode-signatures", str(schema_file)], cwd=root,
+proc = subprocess.run(lmscript_cmd + ["--lmcode-signatures", str(schema_file)], cwd=root,
                       text=True, capture_output=True, check=False)
 assert proc.returncode == 0, proc.stderr
 assert signatures == proc.stdout, "registry signatures differ from the published schema"
@@ -110,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix="lmoci-host-protocol-") as scratch:
     env["HOME"] = str(work / "home")
     env["LMCTL_HOME"] = str(work / "home" / ".lmctl")
     Path(env["HOME"]).mkdir()
-    compiler = subprocess.run([lmscript, str(driver)], cwd=work, env=env, capture_output=True, text=True)
+    compiler = subprocess.run(lmscript_cmd + [str(driver)], cwd=work, env=env, capture_output=True, text=True)
     assert compiler.returncode == 0, (compiler.returncode, compiler.stdout, compiler.stderr)
 
     real = json.loads((work / "real-result.json").read_text(encoding="utf-8"))
