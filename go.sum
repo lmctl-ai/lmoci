@@ -2,8 +2,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gofrs/flock v0.10.0 h1:SHMXenfaB03KbroETaCMtbBg3Yn29v4w1r+tgy4ff4k=
 github.com/gofrs/flock v0.10.0/go.mod h1:FirDy1Ing0mI2+kB6wk+vyyAH+e6xiE+EYA0jnzV9jc=
-github.com/lmctl-ai/lmcloud v0.1.0 h1:WCYsVhdLwYJMFKZUEhTv7YM/HEjqMhQOrj2GMJOilro=
-github.com/lmctl-ai/lmcloud v0.1.0/go.mod h1:99qHT0EFulWuhlIG2mBtQs5bqL2era3MuuYtiCNk6TI=
+github.com/lmctl-ai/lmcloud v0.1.1-0.20261104000805-0cc66983a4cd h1:IavRqR/xYROocv/mswts8C0mrXv4pCp9aDxBi3G5yTI=
+github.com/lmctl-ai/lmcloud v0.1.1-0.20261104000805-0cc66983a4cd/go.mod h1:99qHT0EFulWuhlIG2mBtQs5bqL2era3MuuYtiCNk6TI=
 github.com/lmctl-ai/lmcode-go v0.6.39-0.20261102140952-06cd9ae991d9 h1:FM1pg6GQqiKtMPIJLyX7TZsDqFw9lDzOzwTkpzs+nMs=
 github.com/lmctl-ai/lmcode-go v0.6.39-0.20261102140952-06cd9ae991d9/go.mod h1:Wfm1dj/9Uek4C4Y6LOkL5kFNRojgFUej7DDRGStSfVc=
 github.com/oracle/oci-go-sdk/v65 v65.128.0 h1:QWh0D4VsQ+94XMFy4sapwHVuW5+VOF4dom+h8/cyJsw=

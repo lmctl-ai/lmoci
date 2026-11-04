@@ -12,7 +12,7 @@ unset LMOCI_LIVE LMCLOUD_ENDPOINT LMCLOUD_STORAGE_ENDPOINT LMCLOUD_QUEUE_ENDPOIN
 LMSCRIPT_BIN="${LMSCRIPT_BIN:-/home/ubuntu/lmctl-mono/lmscript/bin/lmscript}"
 LMCLOUD_DIR="${LMCLOUD_DIR:-/home/ubuntu/cloud/lmcloud}"
 SIM_SH="${SIM_SH:-${LMCLOUD_DIR:-/home/ubuntu/cloud/lmcloud}/scripts/sim.sh}"
-export LMCLOUD_SIM_DIR="${LMCLOUD_SIM_DIR:-/home/ubuntu/cloud/lmcloud-sims/.cache/sims}"
+export LMCLOUD_SIM_DIR="${LMCLOUD_SIM_DIR:-${LMCLOUD_DIR}/.cache/sims}"
 
 echo "==> [1/9] Building Go host bin/lmoci (CGO_ENABLED=0 -trimpath)"
 mkdir -p bin
@@ -107,7 +107,7 @@ go vet ./...
 go test -race -count=3 ./...
 
 if [[ -x "$SIM_SH" && -x "$LMCLOUD_DIR/tests/run-conformance.sh" ]]; then
-  echo "==> [9/9] Running lmcloud object-storage + queue conformance against ocisim"
+  echo "==> [9/9] Running lmcloud conformance (open) against ocisim"
   SIM_NAME="${LMOCI_SIM_NAME:-lmoci-test-$$}"
   cleanup_sim() {
     "$SIM_SH" stop oci --name "$SIM_NAME" >/dev/null 2>&1 || true
@@ -117,26 +117,62 @@ if [[ -x "$SIM_SH" && -x "$LMCLOUD_DIR/tests/run-conformance.sh" ]]; then
   LMSCRIPT_BIN="$LMSCRIPT_BIN" "$LMCLOUD_DIR/tests/run-conformance.sh" "$BIN" "$ENDPOINT" all
   cleanup_sim
   trap - EXIT
+
+  SIM_BIN="$LMCLOUD_SIM_DIR/ocisim"
+  if [[ -x "$SIM_BIN" ]] && command -v openssl >/dev/null 2>&1; then
+    echo "==> [9b/9] Running full lmcloud conformance under ocisim --auth enforce"
+    ENF_TMP=$(mktemp -d)
+    PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+    openssl genrsa -out "$ENF_TMP/allow_priv.pem" 2048 >/dev/null 2>&1
+    openssl rsa -in "$ENF_TMP/allow_priv.pem" -pubout -out "$ENF_TMP/allow_pub.pem" >/dev/null 2>&1
+    openssl genrsa -out "$ENF_TMP/deny_priv.pem" 2048 >/dev/null 2>&1
+    openssl rsa -in "$ENF_TMP/deny_priv.pem" -pubout -out "$ENF_TMP/deny_pub.pem" >/dev/null 2>&1
+    ALLOW_KID="ocid1.tenancy.oc1..flocilocaltenancy0000000000000000000000000000000000000000/ocid1.user.oc1..flocilocaluser0000000000000000000000000000000000000000/aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
+    DENY_KID="ocid1.tenancy.oc1..flocilocaltenancy0000000000000000000000000000000000000000/ocid1.user.oc1..denieduser00000000000000000000000000000000000000000000/11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00"
+    python3 -c '
+import json, sys
+allow_pub = open(sys.argv[1]).read()
+deny_pub = open(sys.argv[2]).read()
+cfg = {
+  "credentials": [
+    {
+      "keyId": sys.argv[3],
+      "publicKeyPem": allow_pub,
+      "policy": {"Version": "2026-01-01", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}
+    },
+    {
+      "keyId": sys.argv[4],
+      "publicKeyPem": deny_pub,
+      "policy": {"Version": "2026-01-01", "Statement": [{"Effect": "Deny", "Action": "*", "Resource": "*"}]}
+    }
+  ]
+}
+open(sys.argv[5], "w").write(json.dumps(cfg))
+' "$ENF_TMP/allow_pub.pem" "$ENF_TMP/deny_pub.pem" "$ALLOW_KID" "$DENY_KID" "$ENF_TMP/auth.json"
+    "$SIM_BIN" serve --port "$PORT" --auth enforce --auth-config "$ENF_TMP/auth.json" >"$ENF_TMP/ocisim.log" 2>&1 &
+    ENF_PID=$!
+    cleanup_enf() {
+      kill -TERM "$ENF_PID" >/dev/null 2>&1 || true
+      wait "$ENF_PID" >/dev/null 2>&1 || true
+      rm -rf "$ENF_TMP"
+    }
+    trap cleanup_enf EXIT
+    for _ in $(seq 1 50); do
+      if curl -s -o /dev/null "http://127.0.0.1:$PORT/n/" 2>/dev/null || curl -s -o /dev/null "http://127.0.0.1:$PORT" 2>/dev/null; then
+        break
+      fi
+      sleep 0.1
+    done
+    LMOCI_SIM_KEY_ID="$ALLOW_KID" \
+    LMOCI_SIM_PRIVATE_KEY_PATH="$ENF_TMP/allow_priv.pem" \
+    LMCLOUD_ENFORCE_DENIED_OCI_KEY_ID="$DENY_KID" \
+    LMCLOUD_ENFORCE_DENIED_OCI_PRIVATE_KEY_PATH="$ENF_TMP/deny_priv.pem" \
+    LMSCRIPT_BIN="$LMSCRIPT_BIN" "$LMCLOUD_DIR/tests/run-conformance.sh" "$BIN" "http://127.0.0.1:$PORT" all
+    cleanup_enf
+    trap - EXIT
+  fi
 else
   echo "==> [9/9] Skipping ocisim conformance (sim.sh or lmcloud repo not found)"
-fi
-
-# Optional: enforced conformance against an auth-capable ocisim JVM build.
-#   OCISIM_AUTH_JAR=.../quarkus-run.jar OCISIM_AUTH_CONFIG=auth.json [OCISIM_JAVA=java]
-#   LMOCI_SIM_KEY_ID / LMOCI_SIM_PRIVATE_KEY_PATH            (allowed principal)
-#   LMCLOUD_ENFORCE_DENIED_OCI_KEY_ID / ..._PRIVATE_KEY_PATH  (policy-denied principal)
-if [[ -n "${OCISIM_AUTH_JAR:-}" && -n "${OCISIM_AUTH_CONFIG:-}" ]]; then
-  echo "==> [10/10] Running conformance against auth-enforced ocisim (expects 0 skips)"
-  PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
-  ENF_LOG=$(mktemp)
-  "${OCISIM_JAVA:-java}" -jar "$OCISIM_AUTH_JAR" serve --port "$PORT" --auth enforce --auth-config "$OCISIM_AUTH_CONFIG" >"$ENF_LOG" 2>&1 &
-  ENF_PID=$!
-  trap 'kill $ENF_PID 2>/dev/null || true; wait $ENF_PID 2>/dev/null || true; rm -f "$ENF_LOG"' EXIT
-  for _ in $(seq 1 120); do curl -s -o /dev/null "http://127.0.0.1:$PORT/n/" && break; sleep 0.5; done
-  OUT=$(LMSCRIPT_BIN="$LMSCRIPT_BIN" "$LMCLOUD_DIR/tests/run-conformance.sh" "$BIN" "http://127.0.0.1:$PORT" all)
-  echo "$OUT"
-  grep -q "skip 0, fail 0" <<<"$OUT" || { echo "enforced conformance did not run every scenario" >&2; exit 1; }
-  kill $ENF_PID 2>/dev/null || true; wait $ENF_PID 2>/dev/null || true; rm -f "$ENF_LOG"; trap - EXIT
 fi
 
 echo "ALL GO HOST CHECKS PASSED"

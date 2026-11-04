@@ -3,7 +3,7 @@ module github.com/lmctl-ai/lmoci
 go 1.26.10
 
 require (
-	github.com/lmctl-ai/lmcloud v0.1.0
+	github.com/lmctl-ai/lmcloud v0.1.1-0.20261104000805-0cc66983a4cd
 	github.com/lmctl-ai/lmcode-go v0.6.39-0.20261102140952-06cd9ae991d9
 	github.com/oracle/oci-go-sdk/v65 v65.128.0
 )
