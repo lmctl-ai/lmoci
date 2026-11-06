@@ -1,0 +1,47 @@
+# Access: Write to ocisim with the native lmoci host (OCI SDK for Java)
+# What: Static site on Object Storage with the native API: namespace, bucket, uploads, HEAD, prefix listing, atomic publish by rename, delete, bucket removal, bucket inventory
+# When: Building a deploy step that swaps a new page in without a half-written index
+# Emulator: ocisim (Object Storage) on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/object_storage_site.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: objects and the bucket are deleted
+import "./lib/common.lms";
+
+o = sim_options("object_storage_site", {}, "usage: object_storage_site.lms [--endpoint URL] [--host PATH]");
+bucket = "lmoci-sim-www-" + o.run;
+raw = o.out + "/site.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+check(!cloud.is_demo());
+let ns = cloud.namespace();
+let b = cloud.bucket_create(${bucket});
+let put_index = cloud.object_put(${bucket}, "index.html", "<!doctype html><html><body><h1>v1</h1></body></html>");
+let put_css = cloud.object_put(${bucket}, "assets/site.css", "body{margin:2rem}");
+let put_js = cloud.object_put(${bucket}, "assets/app.js", "console.log('lmoci')");
+let head_css = cloud.object_head(${bucket}, "assets/site.css");
+let assets = cloud.object_list(${bucket}, "assets/");
+let all = cloud.object_list(${bucket}, "");
+let staged = cloud.object_put(${bucket}, "index.html.new", "<!doctype html><html><body><h1>v2</h1></body></html>");
+let published = cloud.object_rename(${bucket}, "index.html.new", "index.html");
+let got = cloud.object_get(${bucket}, "index.html");
+let d1 = cloud.object_delete(${bucket}, "index.html");
+let d2 = cloud.object_delete(${bucket}, "assets/site.css");
+let d3 = cloud.object_delete(${bucket}, "assets/app.js");
+let after = cloud.object_list(${bucket}, "");
+let bucket_head = cloud.bucket_head(${bucket});
+let buckets = cloud.buckets();
+let removed = cloud.bucket_delete(${bucket});
+file_write(${raw}, "{\"namespace\":\"" + ns + "\",\"bucket\":" + b.json() + ",\"puts\":[" + put_index.json() + "," + put_css.json() + "," + put_js.json() + "],\"head_css\":" + head_css.json() + ",\"assets\":" + assets.json() + ",\"all\":" + all.json() + ",\"staged\":" + staged.json() + ",\"published\":" + published.json() + ",\"index_after_publish\":" + got.json() + ",\"deleted\":[" + d1.json() + "," + d2.json() + "," + d3.json() + "],\"after\":" + after.json() + ",\"bucket_head\":" + bucket_head.json() + ",\"buckets_before_delete\":" + buckets.json() + ",\"removed\":" + removed.json() + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+s = sim_read_json(raw);
+assert(len(s.puts) == 3 && getstr(s, "head_css.exists") == "true", "three uploads and a HEAD must succeed");
+assert(len(s.assets) == 2 && len(s.all) == 3, "prefix listing must separate assets from the index");
+assert(getstr(s, "published.renamed") == "true" && contains(getstr(s, "index_after_publish.content"), "v2"), "rename must publish the staged index atomically");
+assert(len(s.after) == 0 && getstr(s, "removed.deleted") == "true", "objects and bucket must be removed");
+assert(len(filter_by(s.buckets_before_delete, "name", bucket)) == 1, "the bucket inventory must list the site bucket");
+println("namespace " + s.namespace + ", bucket " + bucket + ": 3 assets uploaded, index.html.new renamed over index.html (now v2), everything removed");
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", site: s});
+sim_pass(o);

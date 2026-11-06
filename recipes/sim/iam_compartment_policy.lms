@@ -1,0 +1,52 @@
+# Access: Write to ocisim with the native lmoci host (run ledger)
+# What: Permissions for a web project: an owned compartment and policy, offline risk analysis of candidate statements (least privilege to tenancy-wide any-user), identity listings, cleanup
+# When: Deciding what the site's deployers, operators and auditors may do before granting anything in a real tenancy
+# Emulator: ocisim (Identity) on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/iam_compartment_policy.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: run.cleanup() deletes the policy and the compartment
+import "./lib/common.lms";
+
+o = sim_options("iam_compartment_policy", {}, "usage: iam_compartment_policy.lms [--endpoint URL] [--host PATH]");
+raw = o.out + "/iam.json";
+statements = [
+  "Allow group SiteDeployers to manage object-family in compartment web where target.bucket.name = 'lmoci-site-*'",
+  "Allow group SiteOperators to use queues in compartment web",
+  "Allow group SiteAuditors to read all-resources in compartment web",
+  "Allow group SiteAdmins to manage all-resources in compartment web",
+  "Allow any-user to manage all-resources in tenancy"
+];
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+let run = cloud.run(${o.run}, ${o.out + "/ledgers"});
+let compartment = run.compartment("web");
+let policy = run.policy("site-readers");
+let statements = str_split(${join(statements, "|~|")}, "|~|");
+let analyses = "[";
+for (i in range(0, statements.len())) {
+  if (i > 0) { analyses = analyses + ","; }
+  analyses = analyses + cloud.analyze_policy(statements.at(i)).json();
+}
+analyses = analyses + "]";
+let compartments = cloud.compartments();
+let policies = cloud.policies();
+let users = cloud.users();
+let groups = cloud.groups();
+let identity = cloud.identity();
+let described = run.describe(policy);
+run.cleanup();
+check(run.remaining() == 0);
+file_write(${raw}, "{\"compartment\":" + compartment.json() + ",\"policy\":" + policy.json() + ",\"policy_described\":" + described.json() + ",\"analyses\":" + analyses + ",\"compartments\":" + compartments.json() + ",\"policies\":" + policies.json() + ",\"users\":" + users.json() + ",\"groups\":" + groups.json() + ",\"identity\":" + identity.json() + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+iam = sim_read_json(raw);
+assert(getstr(iam, "compartment.status") == "ACTIVE" && getstr(iam, "policy.status") == "ACTIVE", "compartment and policy must be ACTIVE on the emulator");
+assert(len(filter_by(iam.compartments, "name", iam.compartment.name)) == 1 && len(filter_by(iam.policies, "name", iam.policy.name)) == 1, "identity listings must show the owned compartment and policy");
+levels = pluck(iam.analyses, "risk_level");
+assert(levels[0] == "LOW" && levels[len(levels) - 1] == "CRITICAL", "the scoped deployer statement must be LOW risk and the any-user statement CRITICAL: " + json_stringify(levels));
+for (i in range(0, len(statements))) { println(pad_end(levels[i], 9) + statements[i]); }
+println("compartment " + iam.compartment.name + " and policy " + iam.policy.name + " created, described (" + getstr(iam, "policy_described.status") + ") and removed; " + str(len(iam.users)) + " users, " + str(len(iam.groups)) + " groups on the emulator");
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", statements: statements, iam: iam});
+sim_pass(o);

@@ -1,0 +1,35 @@
+# Access: Write to ocisim with the native lmoci host (run ledger)
+# What: Serverless and container control planes for a site: an owned OCI Functions application (the container-backed function host), function and OKE cluster inventories, availability domains and regions, describe, cleanup
+# When: Choosing between Functions and Kubernetes for a site's API before deploying code (invocation and image deploys need a Docker-backed emulator and are not attempted)
+# Emulator: ocisim (Functions and OKE control planes in mock mode) on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/functions_application.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: run.cleanup() deletes the application
+import "./lib/common.lms";
+
+o = sim_options("functions_application", {}, "usage: functions_application.lms [--endpoint URL] [--host PATH]");
+raw = o.out + "/functions.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+let run = cloud.run(${o.run}, ${o.out + "/ledgers"});
+let app = run.application("site-api");
+let described = run.describe(app);
+let functions = cloud.functions();
+let clusters = cloud.clusters();
+let ads = cloud.availability_domains();
+let regions = cloud.regions();
+run.cleanup();
+check(run.remaining() == 0);
+let after = cloud.functions();
+file_write(${raw}, "{\"application\":" + app.json() + ",\"described\":" + described.json() + ",\"functions_before_cleanup\":" + functions.json() + ",\"functions_after_cleanup\":" + after.json() + ",\"clusters\":" + clusters.json() + ",\"availability_domains\":" + ads.json() + ",\"regions\":" + regions.json() + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+f = sim_read_json(raw);
+assert(getstr(f, "application.status") == "ACTIVE" && getstr(f, "described.status") == "ACTIVE", "the Functions application must be ACTIVE");
+assert(len(filter_by(f.functions_before_cleanup, "id", f.application.id)) == 1 && len(filter_by(f.functions_after_cleanup, "id", f.application.id)) == 0, "the application must appear in the inventory and disappear after cleanup");
+assert(len(f.availability_domains) >= 1 && len(f.regions) >= 1, "the emulator must report its availability domains and regions");
+println("application " + f.application.name + " (" + f.application.id + ") created in " + f.application.region + " and removed; " + str(len(f.clusters)) + " OKE clusters, " + str(len(f.availability_domains)) + " availability domains, " + str(len(f.regions)) + " regions");
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", functions: f});
+sim_pass(o);

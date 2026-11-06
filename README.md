@@ -64,6 +64,8 @@ lmoci vault list-vaults --demo
 
 ## Using `lmoci` with `ocisim` (Local OCI Emulator)
 
+Ready-made recipes that exercise Object Storage sites, queues, streams, IAM compartments and policies, Vault/KMS/Secrets, Functions applications and `--auth enforce` permissions against ocisim live in [recipes/sim/README.md](recipes/sim/README.md).
+
 Point `lmoci` at a local [`ocisim`](https://github.com/lmctl-ai/ocisim) instance (`http://127.0.0.1:4599`) via `--endpoint` or `OCI_ENDPOINT`:
 
 ```bash

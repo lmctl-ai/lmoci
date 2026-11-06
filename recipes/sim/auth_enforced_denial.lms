@@ -1,0 +1,158 @@
+# Access: Write to an ocisim started with --auth enforce (shared lmcloud schema, Go lmoci build)
+# What: Permissions on the emulator: generate RSA keys for an admin and a restricted site deployer, author ocisim's credential/policy file with a _json_ template (OCI IAM statements plus a JSON deny list), then prove the deployer's own bucket and queue work, writes and deletes on a protected bucket and deleting any queue fail with PERMISSION_DENIED, and an unknown key id fails with UNAUTHENTICATED
+# When: Testing a web site's group policies locally before writing them in a real tenancy
+# Emulator: ocisim serve --auth enforce --auth-config <out>/ocisim-auth.json (default endpoint http://127.0.0.1:4600); key generation uses the openssl CLI
+# Run: lmscript recipes/sim/auth_enforced_denial.lms --prepare; ocisim serve --port 4600 --auth enforce --auth-config data/sim/auth_enforced_denial/ocisim-auth.json; lmscript recipes/sim/auth_enforced_denial.lms
+# Arguments: --endpoint URL --cloud-host PATH --run ID --out DIR [--prepare]
+# Cleanup: the admin removes the protected bucket and queue; the deployer removes its own bucket, the admin its queue
+import "./lib/common.lms";
+
+o = sim_options("auth_enforced_denial", {
+  endpoint: {type: "string", default: getenv("OCISIM_ENFORCE_ENDPOINT", "http://127.0.0.1:4600"), description: "enforce-mode ocisim origin"},
+  prepare: {type: "boolean", description: "only write keys and the auth config, then exit"}
+}, "usage: auth_enforced_denial.lms [--prepare] [--endpoint URL] [--cloud-host PATH]");
+tenancy = "ocid1.tenancy.oc1..flocilocaltenancy0000000000000000000000000000000000000000";
+admin_user = "ocid1.user.oc1..lmocisimadmin00000000000000000000000000000000000000000000";
+deployer_user = "ocid1.user.oc1..lmocisimdeployer000000000000000000000000000000000000000000";
+own_bucket = "lmoci-sim-deploy-" + o.run;
+own_queue = "lmoci-sim-jobs-" + o.run;
+protected_bucket = "lmoci-sim-protected-" + o.run;
+protected_queue = "lmoci-sim-protected-audit-" + o.run;
+keys_dir = abs_path(o.out + "/keys");
+mkdir(keys_dir, true);
+
+fn keypair(name) {
+  let priv = keys_dir + "/" + name + "-private.pem";
+  let pub = keys_dir + "/" + name + "-public.pem";
+  let der = keys_dir + "/" + name + "-public.der";
+  if (!file_exists(priv)) {
+    assert(system(["openssl", "genrsa", "-out", priv, "2048"]).code == 0, "openssl genrsa failed; the openssl CLI is required to prepare keys");
+    assert(system(["openssl", "rsa", "-in", priv, "-pubout", "-out", pub]).code == 0, "openssl pubout failed");
+    assert(system(["openssl", "rsa", "-pubin", "-in", pub, "-outform", "DER", "-out", der]).code == 0, "openssl DER export failed");
+  }
+  let digest = system(["openssl", "dgst", "-md5", "-c", der]);
+  assert(digest.code == 0, "openssl dgst failed");
+  let fingerprint = trim(split(digest.stdout, "= ")[1]);
+  return {private: priv, public: pub, fingerprint: fingerprint};
+}
+admin_key = keypair("admin");
+deployer_key = keypair("deployer");
+admin_key_id = tenancy + "/" + admin_user + "/" + admin_key.fingerprint;
+deployer_key_id = tenancy + "/" + deployer_user + "/" + deployer_key.fingerprint;
+
+# Group statements grant the families; the JSON list denies the protected names and every queue deletion.
+auth = _json_;
+{
+  "credentials": [
+    {"keyId": ${admin_key_id}, "publicKeyFile": ${admin_key.public}, "groups": ["SiteAdmins"],
+     "statements": ["Allow group SiteAdmins to manage all-resources in tenancy"]},
+    {"keyId": ${deployer_key_id}, "publicKeyFile": ${deployer_key.public}, "groups": ["SiteDeployers"],
+     "statements": [
+       "Allow group SiteDeployers to manage object-family in tenancy",
+       "Allow group SiteDeployers to manage queue-family in tenancy",
+       "Allow group SiteDeployers to inspect compartments in tenancy"
+     ],
+     "policy": {"Version": "2026-01-01", "Statement": [
+       {"Effect": "Deny", "Action": ["oci:os:PutObject", "oci:os:DeleteObject", "oci:os:DeleteBucket"], "Resource": ["bucket:lmoci-sim-protected*", "bucket:lmoci-sim-protected*/object:*"]},
+       {"Effect": "Deny", "Action": "oci:queue:DeleteQueue", "Resource": "*"}
+     ]}}
+  ]
+}
+end _json_
+auth_path = o.out + "/ocisim-auth.json";
+write_json(auth_path, auth.value());
+println("auth config: " + auth_path);
+if (o.prepare) { println("start the emulator with: ocisim serve --port 4600 --auth enforce --auth-config " + auth_path); exit(0); }
+
+fn as_principal(key_id, key) {
+  set_env("LMOCI_SIM_KEY_ID", key_id);
+  set_env("LMOCI_SIM_PRIVATE_KEY_PATH", key);
+}
+
+setup = _lmcode_ schema="../../schema/lmcloud.dsl.json";
+  cloud.set_endpoint("all", ${o.endpoint});
+  cloud.bucket_create(${protected_bucket});
+  cloud.object_put(${protected_bucket}, "audit/2026.log", "immutable audit trail", "text/plain", str_map());
+  cloud.queue_create(${protected_queue});
+  lmcode_return_put("ok", true);
+end _lmcode_
+teardown = _lmcode_ schema="../../schema/lmcloud.dsl.json";
+  cloud.set_endpoint("all", ${o.endpoint});
+  cloud.set_abort_on_error(false);
+  cloud.object_delete(${protected_bucket}, "audit/2026.log");
+  cloud.object_delete(${protected_bucket}, "deploy.txt");
+  lmcode_return_put("bucket", cloud.bucket_delete(${protected_bucket}));
+  lmcode_return_put("protected_queue", cloud.queue_delete(${protected_queue}));
+  lmcode_return_put("own_queue", cloud.queue_delete(${own_queue}));
+end _lmcode_
+deploy = _lmcode_ schema="../../schema/lmcloud.dsl.json";
+  cloud.set_endpoint("all", ${o.endpoint});
+  cloud.set_abort_on_error(false);
+  let created = cloud.bucket_create(${own_bucket});
+  let create_code = cloud.last_error().code();
+  cloud.object_put(${own_bucket}, "index.html", "<h1>deployed</h1>", "text/html", str_map());
+  let put_code = cloud.last_error().code();
+  let qcreated = cloud.queue_create(${own_queue});
+  let qcreate_code = cloud.last_error().code();
+  cloud.queue_send(${own_queue}, "{\"job\":1}");
+  let send_code = cloud.last_error().code();
+
+  cloud.object_put(${protected_bucket}, "deploy.txt", "tampered", "text/plain", str_map());
+  let protected_put_code = cloud.last_error().code();
+  let protected_put_status = cloud.last_error().http_status();
+  let audit = cloud.object_get(${protected_bucket}, "audit/2026.log");
+  let protected_get_code = cloud.last_error().code();
+  cloud.bucket_delete(${protected_bucket});
+  let protected_delete_code = cloud.last_error().code();
+  cloud.queue_delete(${own_queue});
+  let queue_delete_code = cloud.last_error().code();
+
+  cloud.object_delete(${own_bucket}, "index.html");
+  let deleted = cloud.bucket_delete(${own_bucket});
+  lmcode_return_put("open_mode", protected_put_code == ErrorCode.OK);
+  lmcode_return_put("created", created);
+  lmcode_return_put("create_code", str(create_code));
+  lmcode_return_put("put_code", str(put_code));
+  lmcode_return_put("qcreate_code", str(qcreate_code));
+  lmcode_return_put("send_code", str(send_code));
+  lmcode_return_put("protected_put_code", str(protected_put_code));
+  lmcode_return_put("protected_put_status", protected_put_status);
+  lmcode_return_put("protected_get_code", str(protected_get_code));
+  lmcode_return_put("audit_readable", audit == "immutable audit trail");
+  lmcode_return_put("protected_delete_code", str(protected_delete_code));
+  lmcode_return_put("queue_delete_code", str(queue_delete_code));
+  lmcode_return_put("deleted", deleted);
+end _lmcode_
+unauth = _lmcode_ schema="../../schema/lmcloud.dsl.json";
+  cloud.set_endpoint("all", ${o.endpoint});
+  cloud.set_abort_on_error(false);
+  cloud.bucket_create(${own_bucket + "-x"});
+  let code = cloud.last_error().code();
+  if (code == ErrorCode.OK) { cloud.bucket_delete(${own_bucket + "-x"}); }
+  lmcode_return_put("code", str(code));
+  lmcode_return_put("status", cloud.last_error().http_status());
+end _lmcode_
+
+as_principal(admin_key_id, admin_key.private);
+sim_run(setup, oci_cloud_command(o));
+as_principal(deployer_key_id, deployer_key.private);
+r = sim_run(deploy, oci_cloud_command(o)).result;
+as_principal(tenancy + "/ocid1.user.oc1..unknownuser0000000000000000000000000000000000000000000000/" + deployer_key.fingerprint, deployer_key.private);
+u = sim_run(unauth, oci_cloud_command(o)).result;
+as_principal(admin_key_id, admin_key.private);
+t = sim_run(teardown, oci_cloud_command(o)).result;
+if (r.open_mode) {
+  println("SKIP: " + o.endpoint + " let the deployer write into the protected bucket, so it is running in open mode; restart it with --auth enforce --auth-config " + auth_path);
+  exit(0);
+}
+assert(r.created && r.create_code == "OK" && r.put_code == "OK" && r.qcreate_code == "OK" && r.send_code == "OK", "the deployer's own bucket, object and queue operations must succeed");
+assert(r.protected_put_code == "PERMISSION_DENIED" && r.protected_put_status == 403 && r.protected_delete_code == "PERMISSION_DENIED", "writes to and deletion of the protected bucket must be denied, got " + r.protected_put_code + "/" + r.protected_delete_code);
+assert(r.protected_get_code == "OK" && r.audit_readable, "the deployer may still read the protected audit log");
+assert(r.queue_delete_code == "PERMISSION_DENIED", "queue deletion must be denied to the deployer, got " + r.queue_delete_code);
+assert(r.deleted && t.bucket && t.protected_queue && t.own_queue, "deployer and admin must clean up their resources");
+assert(u.code == "UNAUTHENTICATED" && u.status == 401, "an unknown key id must fail with UNAUTHENTICATED/401, got " + u.code + "/" + str(u.status));
+println("deployer allowed: " + own_bucket + " create/put/delete, queue " + own_queue + " create/send, read of the protected audit log");
+println("deployer denied:  " + protected_bucket + " object put and bucket delete, deleting any queue (PERMISSION_DENIED 403)");
+println("unknown key id: UNAUTHENTICATED 401; admin removed the protected bucket and both queues");
+sim_report(o, {endpoint: o.endpoint, host: "lmoci cloud", auth_config: auth_path, admin_key_id: admin_key_id, deployer_key_id: deployer_key_id, results: r, unauthenticated: u, teardown: t});
+sim_pass(o);

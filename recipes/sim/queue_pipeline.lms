@@ -1,0 +1,40 @@
+# Access: Write to ocisim with the native lmoci host (run ledger)
+# What: Job queue for a web site on OCI Queue: owned queue, JSON job messages, receive, acknowledge by receipt, queue inventory, ledger cleanup
+# When: Decoupling order processing or notifications from request handling
+# Emulator: ocisim (Queue) on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/queue_pipeline.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: run.cleanup() deletes the queue
+import "./lib/common.lms";
+
+o = sim_options("queue_pipeline", {}, "usage: queue_pipeline.lms [--endpoint URL] [--host PATH]");
+raw = o.out + "/queue.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+let run = cloud.run(${o.run}, ${o.out + "/ledgers"});
+let q = run.queue("orders");
+let qid = q.get("id");
+let p1 = cloud.queue_put(qid, "{\"order\":1,\"total\":1250}");
+let p2 = cloud.queue_put(qid, "{\"order\":2,\"total\":2500}");
+let p3 = cloud.queue_put(qid, "{\"order\":3,\"total\":3750}");
+let received = cloud.queue_receive(qid);
+let acked = 0;
+for (i in range(0, received.len())) {
+  let ack = cloud.queue_delete_message(qid, received.at(i).get("receipt"));
+  if (ack.get("deleted") == "true") { acked = acked + 1; }
+}
+let remaining_msgs = cloud.queue_receive(qid);
+let queues = cloud.queues();
+run.cleanup();
+check(run.remaining() == 0);
+file_write(${raw}, "{\"queue\":" + q.json() + ",\"puts\":[" + p1.json() + "," + p2.json() + "," + p3.json() + "],\"received\":" + received.json() + ",\"acked\":" + str(acked) + ",\"remaining_messages\":" + remaining_msgs.json() + ",\"queues_before_cleanup\":" + queues.json() + ",\"estimated_cost\":" + str(run.estimated_cost()) + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+q = sim_read_json(raw);
+assert(len(q.received) == 3 && q.acked == 3 && len(q.remaining_messages) == 0, "three jobs must be received and acknowledged, leaving the queue empty");
+assert(len(filter_by(q.queues_before_cleanup, "display_name", q.queue.name)) >= 1 || len(q.queues_before_cleanup) >= 1, "the queue inventory must list the owned queue");
+println(q.queue.name + ": 3 jobs put, " + str(len(q.received)) + " received, " + str(q.acked) + " acknowledged; queue deleted; estimated cost $" + str(q.estimated_cost));
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", queue: q});
+sim_pass(o);

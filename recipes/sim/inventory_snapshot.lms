@@ -1,0 +1,28 @@
+# Access: Read-only against ocisim with the native lmoci host
+# What: One read-only snapshot of the tenancy: identity, users, groups, compartments, policies, regions, availability domains, buckets, queues, streams, vaults, secrets, functions, clusters, plus the request cost summary; JSON and a count CSV
+# When: Before and after a sandbox run, or to check what an emulator started with --data-dir still holds
+# Emulator: ocisim on http://127.0.0.1:4599 (database systems and the organizations/tenancies listing are skipped: ocisim has neither control plane)
+# Run: lmscript recipes/sim/inventory_snapshot.lms
+# Arguments: --endpoint URL --host PATH --out DIR
+# Cleanup: nothing is created
+import "./lib/common.lms";
+
+o = sim_options("inventory_snapshot", {}, "usage: inventory_snapshot.lms [--endpoint URL] [--host PATH]");
+raw = o.out + "/inventory.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+check(!cloud.is_demo());
+file_write(${raw}, "{\"identity\":" + cloud.identity().json() + ",\"users\":" + cloud.users().json() + ",\"groups\":" + cloud.groups().json() + ",\"compartments\":" + cloud.compartments().json() + ",\"policies\":" + cloud.policies().json() + ",\"regions\":" + cloud.regions().json() + ",\"availability_domains\":" + cloud.availability_domains().json() + ",\"buckets\":" + cloud.buckets().json() + ",\"queues\":" + cloud.queues().json() + ",\"streams\":" + cloud.streams().json() + ",\"vaults\":" + cloud.vaults().json() + ",\"secrets\":" + cloud.secrets().json() + ",\"functions\":" + cloud.functions().json() + ",\"clusters\":" + cloud.clusters().json() + ",\"cost\":" + cloud.cost_summary().json() + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+inv = sim_read_json(raw);
+counts = [];
+for (kind in keys(inv)) { if (kind != "cost") { push(counts, {service: kind, count: len(inv[kind])}); } }
+write_csv(o.out + "/inventory_counts.csv", counts);
+for (row in counts) { println(pad_end(row.service, 22) + str(row.count)); }
+assert(len(inv.regions) >= 1 && len(inv.availability_domains) >= 1, "the emulator must answer identity reads");
+println("namespace " + getstr(inv, "identity.0.namespace", "floci-local") + " on " + o.endpoint + ": " + str(getnum(inv, "cost.total_requests")) + " read requests, estimated $" + str(getnum(inv, "cost.estimated_usd")));
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", counts: counts, inventory: inv});
+sim_pass(o);

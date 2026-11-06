@@ -1,0 +1,72 @@
+# Access: Read-only helpers; importing this file changes no files, processes or environment.
+# What: Shared argument parsing, emulator defaults, host invocation and report helpers for recipes/sim.
+# When: Import from every recipes/sim/*.lms entry. See recipes/sim/README.md.
+# Emulator: ocisim on http://127.0.0.1:4599 (Object Storage, Identity, Queue, Streaming, Vault/KMS/Secrets, Functions and OKE control planes).
+
+fn sim_run_id() {
+  let stamp = str(now());
+  return substr(stamp, len(stamp) - 9, 9);
+}
+
+fn sim_flags(extra) {
+  let base = {
+    endpoint: {type: "string", default: getenv("OCISIM_ENDPOINT", "http://127.0.0.1:4599"), description: "ocisim origin; plain http on a loopback address only"},
+    host: {type: "string", default: getenv("LMOCI_BIN", "lmoci"), description: "native lmoci executable (OCI SDK for Java host; its schema is read from the PATH binary named lmoci)"},
+    cloud_host: {flag: "cloud-host", type: "string", default: getenv("LMOCI_CLOUD_BIN", "lmoci"), description: "Go lmoci build serving the shared lmcloud schema (cmd/lmoci)"},
+    region: {type: "string", default: "us-ashburn-1", description: "OCI region name the emulator answers for"},
+    out: {type: "string", default: "", description: "report directory (default data/sim/<recipe>)"},
+    run: {type: "string", default: "", description: "run id suffix; digits or lowercase letters, default from the clock"}
+  };
+  return merge(base, extra);
+}
+
+fn sim_options(name, extra, usage) {
+  let parsed = args_parse(ARGV, sim_flags(extra), usage);
+  if (parsed.help_requested) { println(parsed.help); exit(0); }
+  let o = parsed.values;
+  o.name = name;
+  if (o.out == "") { o.out = "data/sim/" + name; }
+  if (o.run == "") { o.run = sim_run_id(); }
+  assert(regex_test(o.run, "^[a-z0-9]{1,16}$"), "--run must be 1..16 lowercase letters or digits");
+  assert(regex_test(o.endpoint, "^http://(127\\.0\\.0\\.1|localhost|\\[::1\\])(:[0-9]{1,5})?/?$"), "--endpoint must be a loopback http origin such as http://127.0.0.1:4599");
+  o.endpoint = regex_replace(o.endpoint, "/$", "");
+  mkdir(o.out, true);
+  return o;
+}
+
+# Command line for the native lmoci host. Programs open their session with oci.endpoint(region, url),
+# so no credentials or ~/.oci/config are needed: the host signs loopback requests with an ephemeral key.
+fn oci_native_command(o) {
+  set_env("LMOCI_LIVE", "");
+  set_env("LMOCI_ENDPOINT", o.endpoint);
+  set_env("OCI_ENDPOINT", o.endpoint);
+  return [o.host, "--lmcode", "$DSLFILE"];
+}
+
+# Command line for the Go lmoci build serving the shared lmcloud schema (bucket/object/queue).
+fn oci_cloud_command(o) {
+  set_env("LMOCI_LIVE", "");
+  set_env("LMCLOUD_ENDPOINT", o.endpoint);
+  set_env("LMOCI_ENDPOINT", o.endpoint);
+  return [o.cloud_host, "cloud", "--lmcode", "$DSLFILE"];
+}
+
+fn sim_run(program, command) {
+  let r = run_lmcode(program, {command: command});
+  if (!r.ok) {
+    println("host failed: " + json_stringify(r));
+    exit(1);
+  }
+  return r;
+}
+
+fn sim_read_json(path) { return json_parse(read_file(path)); }
+
+fn sim_report(o, data) {
+  let path = o.out + "/" + o.name + ".json";
+  write_json(path, data, 2);
+  println("report: " + path);
+  return path;
+}
+
+fn sim_pass(o) { println("PASS " + o.name); }

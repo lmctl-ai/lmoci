@@ -1,0 +1,41 @@
+# Access: Write to ocisim with the native lmoci host (run ledger)
+# What: Owned sandbox lifecycle across all six resource kinds (compartment, bucket, queue, stream, policy, application): create, describe, delete one explicitly, cleanup the rest in reverse order, confirm the ledger sweep sees nothing left
+# When: Proving the ledger-backed teardown against the emulator before a live sandbox run
+# Emulator: ocisim on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/sandbox_lifecycle.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: run.cleanup() removes every owned resource; the recipe asserts remaining()==0 and an empty sweep
+import "./lib/common.lms";
+
+o = sim_options("sandbox_lifecycle", {}, "usage: sandbox_lifecycle.lms [--endpoint URL] [--host PATH]");
+ledgers = o.out + "/ledgers";
+raw = o.out + "/lifecycle.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+let run = cloud.run(${o.run}, ${ledgers});
+let c = run.compartment("sandbox");
+let b = run.bucket("artifacts");
+let q = run.queue("jobs");
+let s = run.stream("events");
+let p = run.policy("readonly");
+let a = run.application("fnapp");
+let created = run.remaining();
+let described = run.describe(b);
+let deleted_queue = run.delete(q);
+let after_delete = run.remaining();
+run.cleanup();
+let after_cleanup = run.remaining();
+let sweep = cloud.sweep(${ledgers}, 0);
+file_write(${raw}, "{\"resources\":[" + c.json() + "," + b.json() + "," + q.json() + "," + s.json() + "," + p.json() + "," + a.json() + "],\"created\":" + str(created) + ",\"described\":" + described.json() + ",\"deleted_queue\":" + deleted_queue.json() + ",\"after_delete\":" + str(after_delete) + ",\"after_cleanup\":" + str(after_cleanup) + ",\"sweep\":" + sweep.json() + ",\"estimated_cost\":" + str(run.estimated_cost()) + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+l = sim_read_json(raw);
+assert(l.created == 6 && l.after_delete == 5 && l.after_cleanup == 0, "six owned resources, five after one explicit delete, none after cleanup");
+assert(getstr(l, "described.status") == "ACTIVE" && getstr(l, "deleted_queue.status") == "DELETED", "describe and delete must report emulator state");
+assert(len(l.sweep) == 0, "the ledger sweep must find nothing left: " + json_stringify(l.sweep));
+for (res in l.resources) { println(pad_end(res.kind, 12) + res.name); }
+println("6 created, 1 deleted explicitly, cleanup removed the rest; sweep of " + ledgers + " is empty; estimated cost $" + str(l.estimated_cost));
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", lifecycle: l});
+sim_pass(o);

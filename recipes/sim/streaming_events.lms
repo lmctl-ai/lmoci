@@ -1,0 +1,35 @@
+# Access: Write to ocisim with the native lmoci host (run ledger)
+# What: Clickstream for a web site on OCI Streaming: owned stream, keyed events, TRIM_HORIZON cursor, ordered read-back, stream inventory, ledger cleanup
+# When: Capturing page views or audit events that several consumers replay independently
+# Emulator: ocisim (Streaming) on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/streaming_events.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: run.cleanup() deletes the stream
+import "./lib/common.lms";
+
+o = sim_options("streaming_events", {}, "usage: streaming_events.lms [--endpoint URL] [--host PATH]");
+raw = o.out + "/stream.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+let run = cloud.run(${o.run}, ${o.out + "/ledgers"});
+let s = run.stream("pageviews");
+let sid = s.get("id");
+let e1 = cloud.stream_put(sid, "visitor-a", "{\"path\":\"/\",\"ms\":12}");
+let e2 = cloud.stream_put(sid, "visitor-b", "{\"path\":\"/pricing\",\"ms\":48}");
+let e3 = cloud.stream_put(sid, "visitor-a", "{\"path\":\"/checkout\",\"ms\":210}");
+let cursor = cloud.stream_cursor(sid, "0", "TRIM_HORIZON");
+let messages = cloud.stream_get_messages(sid, cursor.get("cursor"));
+let streams = cloud.streams();
+run.cleanup();
+check(run.remaining() == 0);
+file_write(${raw}, "{\"stream\":" + s.json() + ",\"puts\":[" + e1.json() + "," + e2.json() + "," + e3.json() + "],\"cursor\":" + cursor.json() + ",\"messages\":" + messages.json() + ",\"streams_before_cleanup\":" + streams.json() + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+s = sim_read_json(raw);
+assert(len(s.messages) == 3 && s.messages[0].key == "visitor-a" && s.messages[2].key == "visitor-a", "all three events must replay in order from TRIM_HORIZON");
+assert(getnum(s.puts[2], "offset") == 2 && getnum(s.puts[2], "failures") == 0, "puts must report sequential offsets without failures");
+println(s.stream.name + ": 3 events on partition " + getstr(s.cursor, "partition") + ", replayed " + str(len(s.messages)) + " from " + getstr(s.cursor, "type") + "; stream deleted");
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", stream: s});
+sim_pass(o);
