@@ -1,0 +1,38 @@
+# Access: Write to ocisim with the native lmoci host (run ledger)
+# What: Stream consumers: a TRIM_HORIZON cursor replays everything from the beginning while a LATEST cursor created mid-stream only sees later events; both cursors are read after more events arrive
+# When: Deciding how a new consumer (analytics backfill versus live dashboard) should join a site's event stream
+# Emulator: ocisim (Streaming) on http://127.0.0.1:4599
+# Run: lmscript recipes/sim/stream_cursor_types.lms
+# Arguments: --endpoint URL --host PATH --run ID --out DIR
+# Cleanup: run.cleanup() deletes the stream
+import "./lib/common.lms";
+
+o = sim_options("stream_cursor_types", {}, "usage: stream_cursor_types.lms [--endpoint URL] [--host PATH]");
+raw = o.out + "/cursors.json";
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.endpoint(${o.region}, ${o.endpoint});
+let run = cloud.run(${o.run}, ${o.out + "/ledgers"});
+let s = run.stream("clicks");
+let sid = s.get("id");
+cloud.stream_put(sid, "visitor-1", "{\"path\":\"/\"}");
+cloud.stream_put(sid, "visitor-2", "{\"path\":\"/pricing\"}");
+let backfill = cloud.stream_cursor(sid, "0", "TRIM_HORIZON");
+let live = cloud.stream_cursor(sid, "0", "LATEST");
+cloud.stream_put(sid, "visitor-1", "{\"path\":\"/checkout\"}");
+cloud.stream_put(sid, "visitor-3", "{\"path\":\"/docs\"}");
+let replayed = cloud.stream_get_messages(sid, backfill.get("cursor"));
+let tailed = cloud.stream_get_messages(sid, live.get("cursor"));
+let streams = cloud.streams();
+run.cleanup();
+check(run.remaining() == 0);
+file_write(${raw}, "{\"stream\":" + s.json() + ",\"backfill_cursor\":" + backfill.json() + ",\"live_cursor\":" + live.json() + ",\"replayed\":" + replayed.json() + ",\"tailed\":" + tailed.json() + ",\"streams_before_cleanup\":" + streams.json() + "}");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+c = sim_read_json(raw);
+assert(len(c.replayed) == 4 && getnum(c.replayed[0], "offset") == 0, "TRIM_HORIZON must replay all four events from offset 0");
+assert(len(c.tailed) == 2 && getnum(c.tailed[0], "offset") == 2 && c.tailed[0].key == "visitor-1", "LATEST must only see the two events published after the cursor was created");
+println(c.stream.name + ": TRIM_HORIZON replayed " + str(len(c.replayed)) + " events (offsets 0.." + str(getnum(c.replayed[len(c.replayed) - 1], "offset")) + "), LATEST tailed " + str(len(c.tailed)) + " (offsets " + str(getnum(c.tailed[0], "offset")) + ".." + str(getnum(c.tailed[1], "offset")) + "); stream deleted");
+sim_report(o, {endpoint: o.endpoint, host: "lmoci", cursors: c});
+sim_pass(o);

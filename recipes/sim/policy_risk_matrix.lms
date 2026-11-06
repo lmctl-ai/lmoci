@@ -1,0 +1,51 @@
+# Access: Read-only (native lmoci host; the policy analyzer runs offline inside the host, nothing is created)
+# What: Policy unit tests: a matrix of candidate IAM statements for a web project is scored offline, the recipe asserts each statement's expected risk level (scoped deployer LOW, compartment admin MEDIUM, tenancy-wide admin HIGH, any-user CRITICAL) and writes the matrix as CSV
+# When: Reviewing a policy change in CI before anyone applies it to a tenancy
+# Emulator: none required (offline analyzer); the emulator endpoint is still accepted so the recipe fits the runner
+# Run: lmscript recipes/sim/policy_risk_matrix.lms
+# Arguments: --endpoint URL --host PATH --out DIR
+# Cleanup: nothing is created
+import "./lib/common.lms";
+
+o = sim_options("policy_risk_matrix", {}, "usage: policy_risk_matrix.lms [--host PATH]");
+raw = o.out + "/matrix.json";
+cases = [
+  {statement: "Allow group SiteDeployers to manage object-family in compartment web where target.bucket.name = 'lmoci-site-*'", expected: "LOW"},
+  {statement: "Allow group SiteOperators to use queues in compartment web", expected: "LOW"},
+  {statement: "Allow group SiteOperators to use stream-push in compartment web", expected: "LOW"},
+  {statement: "Allow group SiteAuditors to read all-resources in compartment web", expected: "LOW"},
+  {statement: "Allow group SiteAdmins to manage all-resources in compartment web", expected: "MEDIUM"},
+  {statement: "Allow group SiteAdmins to manage all-resources in tenancy", expected: "HIGH"},
+  {statement: "Allow any-user to read object-family in compartment web", expected: "CRITICAL"},
+  {statement: "Allow any-user to manage all-resources in tenancy", expected: "CRITICAL"}
+];
+statements = pluck(cases, "statement");
+
+program = _lmcode_ cli="lmoci";
+let cloud = oci.demo();
+let statements = str_split(${join(statements, "|~|")}, "|~|");
+let out = "[";
+for (i in range(0, statements.len())) {
+  if (i > 0) { out = out + ","; }
+  out = out + cloud.analyze_policy(statements.at(i)).json();
+}
+file_write(${raw}, out + "]");
+end _lmcode_
+
+sim_run(program, oci_native_command(o));
+rows = sim_read_json(raw);
+assert(len(rows) == len(cases), "the analyzer must score every statement");
+matrix = [];
+mismatches = [];
+for (i in range(0, len(cases))) {
+  level = getstr(rows[i], "risk_level");
+  push(matrix, {expected: cases[i].expected, actual: level, any_user: getnum(rows[i], "any_user_count"), manage_all: getnum(rows[i], "manage_all_count"), statement: cases[i].statement});
+  verdict = if_else(level == cases[i].expected, "ok", "MISMATCH");
+  println(pad_end(verdict, 9) + pad_end(level, 9) + cases[i].statement);
+  if (verdict != "ok") { push(mismatches, matrix[i]); }
+}
+write_csv(o.out + "/policy_risk_matrix.csv", matrix);
+assert(len(mismatches) == 0, "statements scored differently than expected: " + json_stringify(mismatches));
+println(str(len(cases)) + " statements scored as expected; matrix in " + o.out + "/policy_risk_matrix.csv");
+sim_report(o, {host: "lmoci (offline analyzer)", matrix: matrix});
+sim_pass(o);

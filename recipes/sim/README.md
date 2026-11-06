@@ -60,6 +60,17 @@ everything down. It takes `--ocisim`, `--lmoci`, `--cloud-host`, `--lmscript`
 | `functions_application.lms` | lmoci | Functions, OKE (mock control planes) | Owned Functions application, function and cluster inventories, availability domains and regions |
 | `inventory_snapshot.lms` | lmoci | Identity, Object Storage, Queue, Streaming, Vault, Functions, OKE | Read-only snapshot as JSON plus a per-service count CSV with the request cost summary |
 | `sandbox_lifecycle.lms` | lmoci | all of the above | All six owned kinds created, one deleted explicitly, cleanup in reverse order, empty ledger sweep |
+| `smoke_test.lms` | lmoci cloud | Object Storage, Queue | CI smoke test: emulator answers, bucket/object/queue/message round trips, timed |
+| `error_handling.lms` | lmoci cloud | Object Storage, Queue | Error contract: idempotent creates and deletes, false-not-fail probes, NOT_FOUND/CONFLICT with HTTP status, pre-flight INVALID_ARGUMENT guards |
+| `object_listing_pagination.lms` | lmoci cloud | Object Storage | 120 objects, continuation-token paging in pages of 50, ascending order, prefix counts, exhaustive list |
+| `binary_object_roundtrip.lms` | lmoci cloud | Object Storage | PNG header, all 256 byte values, empty object, UTF-8 text, 64 KiB file byte-exact with content types and ETags |
+| `queue_visibility_timeout.lms` | lmoci cloud | Queue | In-flight messages invisible, redelivered after the visibility timeout with the same ids, nack(0) immediate redelivery, drained |
+| `upload_thumbnail_pipeline.lms` | lmoci cloud | Object Storage, Queue | Uploads enqueue jobs, a worker writes thumbnails with provenance metadata, every upload gets exactly one |
+| `blue_green_release.lms` | lmoci cloud | Object Storage | Two release trees, a current.json pointer, instant switch, verified rollback, prune of the retired release |
+| `concurrent_uploaders.lms` | lmoci cloud | Object Storage | Four host processes upload disjoint prefixes at once (parallel_map), one listing proves nothing lost |
+| `persistence_restart.lms` | lmoci cloud | Object Storage, Queue | Write phase, emulator restart with --data-dir, verify phase: objects intact, queue present (runner shows it as persistence_restart*) |
+| `stream_cursor_types.lms` | lmoci | Streaming | TRIM_HORIZON replays from offset 0 while a LATEST cursor created mid-stream only sees later events |
+| `policy_risk_matrix.lms` | lmoci (offline analyzer) | none | Eight candidate statements scored LOW to CRITICAL with asserted expectations and a CSV matrix |
 
 ## Emulator findings
 
