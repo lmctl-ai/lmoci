@@ -44,7 +44,7 @@ VER=$("$BIN" --version)
 [[ "$VER" == "lmoci 0.2.0" ]] || { echo "unexpected --version: $VER" >&2; exit 1; }
 "$BIN" --help | grep -q "lmoci 0.2.0"
 "$BIN" --notices | grep -q "github.com/oracle/oci-go-sdk/v65"
-grep -q "06cd9ae991d9" go.mod
+grep -q "2027887521b3" go.mod
 python3 - <<'PY'
 import json, re
 with open("sdk.lock", encoding="utf-8") as f:

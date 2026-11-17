@@ -80,7 +80,7 @@ jobs:
           node-version: 24
       - name: Pinned script compiler
         run: |
-          npm install --prefix "$RUNNER_TEMP/lmctl" "@lmctl-ai/lmctl@0.2.458"
+          npm install --prefix "$RUNNER_TEMP/lmctl" "@lmctl-ai/lmctl@0.2.482"
           echo "$RUNNER_TEMP/lmctl/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Stamp release version for this main push
         if: needs.version.outputs.v != ''

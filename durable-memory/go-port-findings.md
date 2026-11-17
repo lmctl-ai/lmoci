@@ -130,3 +130,8 @@ the narrow receipt quirk, missing message id, simulator credentials/scope and en
   foreign origin), send hang-up not retried; token ownership (plain, pre-existing, lost reply) for buckets and
   queues; per-route caps. `test-go.sh`: open 25/25 (2 SKIP), enforced 25/25 (0 SKIP), race ×3.
 - No hostkit v3 bug found during adoption.
+
+## `lmcode_std_v3` REST & CLI interfaces upgrade (2026-11-16)
+
+- Upgraded `github.com/lmctl-ai/lmcode-go` to `2027887521b3d34a44e67849070bf7e39df11b1d`, `github.com/lmctl-ai/lmcloud` to `1205bc1e889325849004a150a35c52e27a6cb3f3` (`lmcloud.lock` + `schema/lmcloud.dsl.json`), and `lmctl-ai/lmcode-java` to `a61bd716a1ccd245211ae244d6b78f505d245210` (`sdk.lock`).
+- Verified all 226 `lmcode_std_v3` standard signatures and 10 standard REST/CLI interfaces (`RestGet`..`RestOptions`, `RestHandler`, `CliCommand`, `CliOption`, `rest_config`, `rest_route`, `rest_serve`, `rest_stop`, `rest_cli`) in `cmd/lmoci/main_test.go` (`TestStdRestAndCliInterfaces`) and `test-go.sh`.
