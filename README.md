@@ -1,4 +1,6 @@
 # lmoci
+
+Documentation: [Quick reference](https://www.lmctl.com/tools/lmoci/) · [LLM skill](https://www.lmctl.com/tools/lmoci/skill.html) · [Guide](https://www.lmctl.com/tools/lmoci/guide.html) · [Reference](https://www.lmctl.com/tools/lmoci/reference.html)
 Script Oracle Cloud from lmscript: typed OCI SDK host, one native executable.
 
 Powered by the official Oracle Cloud Infrastructure (OCI) SDK for Java v3 (`com.oracle.oci.sdk:oci-java-sdk-*` v3.92.1) and the lmcode Java SDK (pinned by reviewed full commit SHA in `sdk.lock`), `lmoci` gives `lmscript` programs and CLI callers a typed, sandboxed OCI host with offline demo fixtures, local emulator support (`ocisim`), and guarded live execution.
